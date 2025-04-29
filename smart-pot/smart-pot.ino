@@ -17,7 +17,7 @@ const byte BLUE_LED = 4;
 const byte BL_PIN = 5;
 
 // Water pump control pin
-const byte WATER_PUMP_PIN = 6;  // Changed to avoid BL_PIN conflict
+const byte WATER_PUMP_PIN = 6;
 
 // Thresholds
 const float TEMP_THRESHOLD = 35.00;
