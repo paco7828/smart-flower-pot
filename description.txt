@@ -1,0 +1,10 @@
+-ESP32 MCU
+-solar powered (charges battery -> boost converter for stable 3.3V -> MCU)
+-temperature sensor
+-humidity sensor
+-soil moisture sensor
+-small display (shows sensor values)
+-light dependent resistor for sunlight detection
+-water level sensor
+-ability to connect to home assistant -> distant monitoring + send message when water container is running low
+-rgb led (red blinking if moisture is low, green glowing if its okay)

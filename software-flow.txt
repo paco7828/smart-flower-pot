@@ -1,0 +1,22 @@
+Power:
+	Solar panel outside -> lifepo battery charger -> lifepo battery (3.2V) -> boost converter (stable 3.3V) -> ESP32
+
+Software flow:
+
+	ESP32 wakes up from light sleep every 30 seconds and reads sensors -> displays humidity, temperature, soil moisture, sunlight, water container level
+
+	RGB led:
+		-if low moisture -> blinks in red
+		-if temp too high -> glows in red
+		-if no sunlight -> glows in blue
+        -if moisture + temp OK + sunlight present -> glows in green
+
+	LDR:
+		-sunlight detected -> enable screen backlight
+		-no sunlight detected -> disable screen backlight
+
+	Water level sensor:
+		-water level below 20% -> sends notification through home assistant
+
+	Soil moisture sensor:
+		-if soil moisture goes below X percent -> water pump gets activated for x seconds
