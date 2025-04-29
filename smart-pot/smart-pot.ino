@@ -16,6 +16,9 @@ const byte BLUE_LED = 4;
 // Screen backlight pin
 const byte BL_PIN = 5;
 
+// Water pump control pin
+const byte WATER_PUMP_PIN = 6;  // Changed to avoid BL_PIN conflict
+
 // Thresholds
 const float TEMP_THRESHOLD = 35.00;
 const int MOISTURE_THRESHOLD = 300;
@@ -66,7 +69,9 @@ void setup() {
   pinMode(GREEN_LED, OUTPUT);
   pinMode(BLUE_LED, OUTPUT);
   pinMode(BL_PIN, OUTPUT);
+  pinMode(WATER_PUMP_PIN, OUTPUT);
 
+  digitalWrite(WATER_PUMP_PIN, LOW);
   turnLedOn();  // All LEDs off
 }
 
@@ -78,8 +83,10 @@ void loop() {
   temperature = bme.readTemperature();
   humidity = bme.readHumidity();
   ldrValue = analogRead(LDR_PIN);
-  moisture = 150;
-  waterLevel = 500;
+  // Test values
+  moisture = 400;
+  waterLevel = 300;
+  temperature = 38.52;
 
   Serial.println(temperature);
   Serial.println(humidity);
@@ -90,6 +97,7 @@ void loop() {
   if (isWatering) {
     if (currentMillis - wateringStartTime >= WATERING_DURATION) {
       isWatering = false;
+      digitalWrite(WATER_PUMP_PIN, LOW);
       lastWateringEndTime = currentMillis;
       Serial.println("Stopping watering...");
     } else {
@@ -181,7 +189,7 @@ void handleLowWaterLevel() {
 
 void waterPlant() {
   Serial.println("Watering plant...");
-  // Activate pump here
   isWatering = true;
+  digitalWrite(WATER_PUMP_PIN, HIGH);  // Activate pump
   wateringStartTime = millis();
 }
