@@ -13,9 +13,6 @@ const byte RED_LED = 2;
 const byte GREEN_LED = 3;
 const byte BLUE_LED = 4;
 
-// Screen backlight pin
-const byte BL_PIN = 5;
-
 // Water pump control pin
 const byte WATER_PUMP_PIN = 6;
 
@@ -68,7 +65,6 @@ void setup() {
   pinMode(RED_LED, OUTPUT);
   pinMode(GREEN_LED, OUTPUT);
   pinMode(BLUE_LED, OUTPUT);
-  pinMode(BL_PIN, OUTPUT);
   pinMode(WATER_PUMP_PIN, OUTPUT);
 
   digitalWrite(WATER_PUMP_PIN, LOW);
@@ -77,21 +73,27 @@ void setup() {
 
 void loop() {
   unsigned long currentMillis = millis();
-  bool alertActive = false;
+  char activeAlert = 'n';  // none
 
   // Read sensor values
   temperature = bme.readTemperature();
   humidity = bme.readHumidity();
   ldrValue = analogRead(LDR_PIN);
-  // Test values
-  moisture = 400;
-  waterLevel = 300;
-  temperature = 38.52;
+  moisture = analogRead(MOISTURE_PIN);
+  waterLevel = analogRead(WATER_LEVEL_PIN);
 
+  Serial.println("------------------------------");
+  Serial.print("Temperature: ");
   Serial.println(temperature);
+  Serial.print("Humidity: ");
   Serial.println(humidity);
+  Serial.print("LDR: ");
   Serial.println(ldrValue);
+  Serial.print("Moisture: ");
+  Serial.println(moisture);
+  Serial.print("Water Level: ");
   Serial.println(waterLevel);
+  Serial.println("------------------------------");
 
   // Stop watering after duration
   if (isWatering) {
@@ -105,50 +107,50 @@ void loop() {
     }
   }
 
-  // Darkness check
-  if (ldrValue < SUNLIGHT_THRESHOLD) {
-    handleDarkness();
-    alertActive = true;
-  } else {
-    digitalWrite(BL_PIN, HIGH);  // Backlight on
-  }
-
-  // Soil moisture check with cooldown
-  if (!isWatering && (!hasWateredOnce || currentMillis - lastWateringEndTime >= WATERING_COOLDOWN)) {
-    if (moisture <= MOISTURE_THRESHOLD) {
-      waterPlant();
-      alertActive = true;
-      hasWateredOnce = true;
-    }
-  }
-
-  // High temperature check
-  if (temperature >= TEMP_THRESHOLD) {
-    handleHighTemp();
-    alertActive = true;
-  }
-
-  // Water level check
+  // Priority 1: Water level check
   if (waterLevel <= WATER_LEVEL_THRESHOLD) {
     if (!firstWaterNotificationSent) {
       handleLowWaterLevel();
       lastWaterNotificationTime = currentMillis;
       waterNotifSent = true;
       firstWaterNotificationSent = true;
+      activeAlert = 'w';
     } else if (!waterNotifSent && currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
       handleLowWaterLevel();
       lastWaterNotificationTime = currentMillis;
       waterNotifSent = true;
+      activeAlert = 'w';
     }
   }
 
-  // Reset notification flag after interval
+  // Reset water level notification flag
   if (currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
     waterNotifSent = false;
   }
 
-  // If no alerts were triggered
-  if (!alertActive) {
+  // Priority 2: High temperature
+  if (activeAlert == 'n' && temperature >= TEMP_THRESHOLD) {
+    handleHighTemp();
+    activeAlert = 'h';
+  }
+
+  // Priority 3: Moisture-based watering (only if enough water)
+  if (activeAlert == 'n' && !isWatering && (!hasWateredOnce || currentMillis - lastWateringEndTime >= WATERING_COOLDOWN)) {
+    if (moisture <= MOISTURE_THRESHOLD && waterLevel > WATER_LEVEL_THRESHOLD) {
+      waterPlant();
+      activeAlert = 'm';
+      hasWateredOnce = true;
+    }
+  }
+
+  // Priority 4: Darkness check
+  if (activeAlert == 'n' && ldrValue < SUNLIGHT_THRESHOLD) {
+    handleDarkness();
+    activeAlert = 'd';
+  }
+
+  // If nothing else triggered
+  if (activeAlert == 'n') {
     handleOK();
   }
 }
@@ -159,10 +161,17 @@ void turnLedOn(char color = 'a') {
   digitalWrite(GREEN_LED, HIGH);
   digitalWrite(BLUE_LED, HIGH);
   switch (color) {
-    case 'r': digitalWrite(RED_LED, LOW); break;
-    case 'g': digitalWrite(GREEN_LED, LOW); break;
-    case 'b': digitalWrite(BLUE_LED, LOW); break;
-    default: break;
+    case 'r':
+      digitalWrite(RED_LED, LOW);
+      break;
+    case 'g':
+      digitalWrite(GREEN_LED, LOW);
+      break;
+    case 'b':
+      digitalWrite(BLUE_LED, LOW);
+      break;
+    default:
+      break;
   }
 }
 
@@ -173,7 +182,6 @@ void handleHighTemp() {
 
 void handleDarkness() {
   Serial.println("Darkness detected!");
-  digitalWrite(BL_PIN, LOW);  // Turn off screen
   turnLedOn('b');
 }
 
