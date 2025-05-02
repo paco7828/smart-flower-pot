@@ -1,5 +1,5 @@
 Power:
-	Solar panel outside -> lifepo battery charger -> lifepo battery (3.2V) -> boost converter (stable 3.3V) -> ESP32 C3 SUPERMINI
+	Solar panel outside -> battery charger ->  battery -> boost converter (stable 3.3V) -> ESP32 C3 SUPERMINI
 
 Software flow:
 
