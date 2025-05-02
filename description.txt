@@ -3,7 +3,6 @@
 -temperature sensor
 -humidity sensor
 -soil moisture sensor
--small display (shows sensor values)
 -light dependent resistor for sunlight detection
 -water level sensor
 -ability to connect to home assistant -> distant monitoring + send message when water container is running low

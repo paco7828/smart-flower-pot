@@ -3,7 +3,7 @@ Power:
 
 Software flow:
 
-	ESP32 wakes up from light sleep every 30 seconds and reads sensors -> displays humidity, temperature, soil moisture, sunlight, water container level
+	ESP32 wakes up from light sleep every 30 seconds and reads sensors
 
 	RGB led:
 		-if low moisture -> blinks in red
