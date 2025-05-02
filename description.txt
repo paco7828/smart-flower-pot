@@ -1,4 +1,4 @@
--ESP32 MCU
+-ESP32 C3 SUPERMINI MCU
 -solar powered (charges battery -> boost converter for stable 3.3V -> MCU)
 -temperature sensor
 -humidity sensor

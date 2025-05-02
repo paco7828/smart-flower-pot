@@ -1,12 +1,12 @@
-MCU - https://modulshop.hu/esp32-wroom-ch340-dual-core-nodemcu-1166?keyword=o
-Solar panel - https://www.hestore.hu/prod_10041679.html
-Battery charger - https://modulshop.hu/tp5000-akku-tolto-1s-lifepo4-3237-v-1a-591?gad_source=1&gbraid=0AAAAAojLZNEBViLhAa3YEJDoom5_2bMwN&gclid=Cj0KCQjw8cHABhC-ARIsAJnY12ww7ySwvy3bboeIuouV113zroCTNk9F-EgQ-CSAn6xEfajjhK2bou4aAqifEALw_wcB
-Step up converter - https://www.hestore.hu/prod_10038537.html
-Battery holder - https://www.hestore.hu/prod_10037457.html
-Battery - https://techfun.hu/termek/18650-lifepo4-akkumulator-3-2v/?attribute_pa_elemtipus=1500-mah-3c-3-2v&gad_source=1&gbraid=0AAAAADPccu5noSBGeQ-nD07Km63Y7jUhM&gclid=Cj0KCQjw8cHABhC-ARIsAJnY12wR7GrEvnpJ6W_fcCsG3lad_w4Iv8_4F-It0vgyntZWlcKT-BgrYvQaApNIEALw_wcB
-Temperature + humidity sensor - https://www.hestore.hu/prod_10047994.html#
-Soil moisture sensor - https://www.hestore.hu/prod_10045867.html#
-Light dependent resistor - https://www.hestore.hu/prod_10036399.html
-Water level sensor - https://www.hestore.hu/prod_10035547.html
-Water pump - https://www.temu.com/hu/usb-powered-submersible-water-pump-for-aquariums-fish-tanks-and-pet-water-fountains--low-voltage-plastic-aquarium-pump-accessory-ideal-for-hydroponics-and-aquatic-pets-g-601099658002051.html?_oak_name_id=6625838737450808178&_oak_mp_inf=EIP929ym1ogBGiA5MmY4ZDhkNjdkNGY0Y2MxYTBjYzFiMTY5YjNhNTBlZSDy4JSJ6DI%3D&top_gallery_url=https%3A%2F%2Fimg.kwcdn.com%2Fproduct%2Fopen%2F2024-09-03%2F1725353548854-56f321b57529401f882c40ce951eb57f-goods.jpeg&spec_gallery_id=4413363285&refer_page_sn=10009&refer_source=0&freesia_scene=2&_oak_freesia_scene=2&_oak_rec_ext_1=ODI5MDA&search_key=mini%20water%20pump&refer_page_el_sn=200049&refer_page_name=search_result&refer_page_id=10009_1745923370315_6lpbqfjegy&_x_sessn_id=y6kgqmsl76
-RGB LED - https://www.hestore.hu/prod_10037596.html
+MCU - 
+Solar panel - 
+Battery charger - 
+Step up converter - 
+Battery holder - 
+Battery - 
+Temperature + humidity sensor - 
+Soil moisture sensor - 
+Light dependent resistor - 
+Water level sensor - 
+Water pump - 
+RGB LED - 

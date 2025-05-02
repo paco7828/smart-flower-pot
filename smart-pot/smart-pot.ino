@@ -4,25 +4,25 @@
 const byte BME_ADDR = 0x76;
 
 // Sensor pins
-const byte LDR_PIN = A0;
-const byte MOISTURE_PIN = A1;
-const byte WATER_LEVEL_PIN = A2;
+const byte MOISTURE_PIN = 0;
+const byte LDR_PIN = 1;
+const byte WATER_LEVEL_PIN = 2;
 
 // RGB LED pins
-const byte RED_LED = 2;
-const byte GREEN_LED = 3;
-const byte BLUE_LED = 4;
+const byte RED_LED = 5;
+const byte GREEN_LED = 6;
+const byte BLUE_LED = 7;
 
 // Water pump control pin
-const byte WATER_PUMP_PIN = 6;
+const byte WATER_PUMP_PIN = 3;
 
-// Thresholds
+// Thresholds - change
 const float TEMP_THRESHOLD = 35.00;
 const int MOISTURE_THRESHOLD = 300;
 const int SUNLIGHT_THRESHOLD = 200;
 const int WATER_LEVEL_THRESHOLD = 200;
 
-// Sensor values
+// Default sensor values
 float temperature = 0.0;
 float humidity = 0.0;
 int ldrValue = 0;
@@ -31,16 +31,16 @@ int waterLevel = 0;
 
 // Notification timing
 unsigned long lastWaterNotificationTime = 0;
-const unsigned long WATER_NOTIFICATION_INTERVAL = 5000;
+const unsigned long WATER_NOTIFICATION_INTERVAL = 5000; // change
 bool waterNotifSent = false;
 bool firstWaterNotificationSent = false;
 
 // Watering control
 bool isWatering = false;
 unsigned long wateringStartTime = 0;
-const unsigned long WATERING_DURATION = 3000;
+const unsigned long WATERING_DURATION = 3000; // change
 unsigned long lastWateringEndTime = 0;
-const unsigned long WATERING_COOLDOWN = 5000;
+const unsigned long WATERING_COOLDOWN = 5000; // change
 bool hasWateredOnce = false;
 
 // BME280 instance
