@@ -156,6 +156,10 @@ void loop() {
   sprintf(dataBuffer, "%d", moisture);
   client.publish("okoscserep/soil_moisture", dataBuffer);
 
+  // Sunlight
+  sprintf(dataBuffer, "%d", ldrValue);
+  client.publish("okoscserep/sunlight", dataBuffer);
+
   Serial.println("MQTT data sent!");
 
   // Stop watering after duration
