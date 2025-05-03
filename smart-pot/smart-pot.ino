@@ -1,6 +1,7 @@
 #include <Adafruit_BME280.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include "time.h"
 
 // WiFi credentials
 const char* WIFI_SSID = "SSID_HERE";       // change
@@ -11,6 +12,12 @@ const char* MQTT_SERVER_IP = "192.168.31.31";
 const int MQTT_SERVER_PORT = 1883;
 const char* MQTT_USERNAME = "okos-cserep";
 const char* MQTT_PASSWORD = "okoscserep123";
+
+// NTP server settings
+const char* ntpServerURL = "pool.ntp.org";
+
+// Time storing variable
+struct tm localTime;
 
 // BME280 address
 const byte BME_ADDR = 0x76;
@@ -80,6 +87,15 @@ void setup() {
 
   // Connect to MQTT server
   client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
+
+  // Set timezone and start NTP
+  configTime(3600, 3600, ntpServerURL);
+
+  // Wait until time is obtained
+  if (!getLocalTime(&localTime)) {
+    Serial.println("Failed to obtain time!");
+    return;
+  }
 
   // BME280 error handling
   if (!bme.begin(BME_ADDR)) {
@@ -290,6 +306,21 @@ void handleLowWaterLevel() {
 
 void waterPlant() {
   Serial.println("Watering plant...");
+  // Get current time
+  if (getLocalTime(&localTime)) {
+    // Format time as HH:MM:SS
+    char timeBuffer[9];
+    sprintf(timeBuffer, "%02d:%02d:%02d", localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
+
+    // Send time to home assistant
+    client.publish("okoscserep/last_watering_time", timeBuffer);
+
+    // Show last watering time in serial
+    Serial.print("Last watering time: ");
+    Serial.println(timeBuffer);
+  }
+
+  // Actual watering
   isWatering = true;
   digitalWrite(WATER_PUMP_PIN, HIGH);  // Activate pump
   wateringStartTime = millis();
