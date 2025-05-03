@@ -76,7 +76,7 @@ void loop() {
   sprintf(buffer, "%d", soil_moisture);
   client.publish("okoscserep/soil_moisture", buffer);
 
-  Serial.println("📤 MQTT adatok elküldve");
+  Serial.println("MQTT data sent!");
 
   delay(5000);
 }
