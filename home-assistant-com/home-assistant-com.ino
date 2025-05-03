@@ -34,7 +34,6 @@ void reconnect() {
     Serial.print("Connecting to MQTT server...");
     if (client.connect("ESP8266Client", mqtt_user, mqtt_password)) {
       Serial.println("Successfully connected to MQTT server!");
-      client.publish("esp32/variable", "23.5");
     } else {
       Serial.print("Error occured: ");
       Serial.print(client.state());
