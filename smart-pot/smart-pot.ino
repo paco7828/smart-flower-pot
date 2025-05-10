@@ -1,11 +1,11 @@
-#include <Adafruit_BME280.h>
+#include <DHT22.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include "time.h"
 
 // WiFi credentials
-const char* WIFI_SSID = "SSID_HERE";       // change
-const char* WIFI_PASSWORD = "PASSW_HERE";  // change
+const char* WIFI_SSID = "SSID";       // change
+const char* WIFI_PASSWORD = "PASSW";  // change
 
 // MQTT broker info
 const char* MQTT_SERVER_IP = "192.168.31.31";
@@ -18,9 +18,6 @@ const char* ntpServerURL = "pool.ntp.org";
 
 // Time storing variable
 struct tm localTime;
-
-// BME280 address
-const byte BME_ADDR = 0x76;
 
 // Sensor pins
 const byte MOISTURE_PIN = 0;
@@ -35,11 +32,14 @@ const byte BLUE_LED = 7;
 // Water pump control pin
 const byte WATER_PUMP_PIN = 3;
 
+// DHT22 pin
+const byte DHT_PIN = 4;
+
 // Thresholds - change
 const float TEMP_THRESHOLD = 35.00;
-const int MOISTURE_THRESHOLD = 300;
-const int SUNLIGHT_THRESHOLD = 200;
-const int WATER_LEVEL_THRESHOLD = 200;
+const int MOISTURE_THRESHOLD = 2000;
+const int SUNLIGHT_THRESHOLD = 1000;
+const int WATER_LEVEL_THRESHOLD = 20;
 
 // Default sensor values
 float temperature = 0.0;
@@ -63,9 +63,9 @@ const unsigned long WATERING_COOLDOWN = 5000;  // change
 bool hasWateredOnce = false;
 
 // Instances
-Adafruit_BME280 bme;
 WiFiClient espClient;
 PubSubClient client(espClient);
+DHT22 dht(DHT_PIN);
 
 // Function predefinitions
 void turnLedOn(char color = 'a');
@@ -97,13 +97,6 @@ void setup() {
     return;
   }
 
-  // BME280 error handling
-  if (!bme.begin(BME_ADDR)) {
-    Serial.println("Couldn't find BME280!");
-    while (1)
-      ;
-  }
-
   // Input pins
   pinMode(LDR_PIN, INPUT);
   pinMode(MOISTURE_PIN, INPUT);
@@ -132,8 +125,8 @@ void loop() {
   char activeAlert = 'n';  // none
 
   // Read sensor values
-  temperature = bme.readTemperature();
-  humidity = bme.readHumidity();
+  temperature = dht.getTemperature();
+  humidity = dht.getHumidity();
   ldrValue = analogRead(LDR_PIN);
   moisture = analogRead(MOISTURE_PIN);
   waterLevel = analogRead(WATER_LEVEL_PIN);
@@ -236,6 +229,7 @@ void loop() {
   if (activeAlert == 'n') {
     handleOK();
   }
+  delay(1000);
 }
 
 // Home assistant functions
