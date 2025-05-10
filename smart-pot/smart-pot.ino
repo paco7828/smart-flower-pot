@@ -64,13 +64,12 @@ void setupWifi() {
 
 void reconnect() {
   while (!client.connected()) {
-    client.connect("ESP8266Client", MQTT_USERNAME, MQTT_PASSWORD);
+    client.connect("smart_flower_pot", MQTT_USERNAME, MQTT_PASSWORD);
     delay(5000);
   }
 }
 
 void setup() {
-  Serial.begin(115200);
   setupWifi();
   client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
   configTime(3600, 3600, ntpServerURL);
@@ -117,16 +116,6 @@ void loop() {
     sprintf(dataBuffer, "%d", isDark);
     client.publish("okoscserep/sunlight", dataBuffer);
 
-    // Print to serial
-    Serial.print("Light: ");
-    Serial.println(ldrValue);
-    Serial.print("Is Dark? ");
-    Serial.println(isDark);
-    Serial.print("Water Level: ");
-    Serial.println(waterLevel);
-    Serial.print("Soil Moisture: ");
-    Serial.println(moisture);
-
     handleAutomation(currentMillis);
 
     // If dark and not watering, go to sleep
@@ -151,7 +140,7 @@ void checkWateringStatus() {
 void handleAutomation(unsigned long currentMillis) {
   if (waterLevel <= WATER_LEVEL_THRESHOLD) {
     if (!waterNotifSent || currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
-      sendNotification("Alacsony vízszint!");
+      sendNotification();
       lastWaterNotificationTime = currentMillis;
       waterNotifSent = true;
     }
@@ -175,9 +164,10 @@ void waterPlant() {
   isWatering = true;
   digitalWrite(WATER_PUMP_PIN, HIGH);
   wateringStartTime = millis();
-  Serial.println("Starting to water the plant now");
 }
 
-void sendNotification(String message) {
-  Serial.println(message);
+void sendNotification() {
+  client.publish("smart_flower_pot/notify", "ON");
+  delay(2000);
+  client.publish("smart_flower_pot/notify", "OFF");
 }
