@@ -1,11 +1,10 @@
 #include <DHT22.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
-#include "time.h"
 
 // WiFi credentials
-const char* WIFI_SSID = "SSID";       // change
-const char* WIFI_PASSWORD = "PASSW";  // change
+const char* WIFI_SSID = "SSID";
+const char* WIFI_PASSWORD = "PASSW";
 
 // MQTT broker info
 const char* MQTT_SERVER_IP = "192.168.31.31";
@@ -13,309 +12,172 @@ const int MQTT_SERVER_PORT = 1883;
 const char* MQTT_USERNAME = "okos-cserep";
 const char* MQTT_PASSWORD = "okoscserep123";
 
-// NTP server settings
+// NTP server
 const char* ntpServerURL = "pool.ntp.org";
 
-// Time storing variable
-struct tm localTime;
-
-// Sensor pins
+// Pins
 const byte MOISTURE_PIN = 0;
 const byte LDR_PIN = 1;
 const byte WATER_LEVEL_PIN = 2;
-
-// RGB LED pins
-const byte RED_LED = 5;
-const byte GREEN_LED = 6;
-const byte BLUE_LED = 7;
-
-// Water pump control pin
 const byte WATER_PUMP_PIN = 3;
-
-// DHT22 pin
 const byte DHT_PIN = 4;
 
-// Thresholds - change
-const float TEMP_THRESHOLD = 35.00;
+// Thresholds
 const int MOISTURE_THRESHOLD = 2000;
-const int SUNLIGHT_THRESHOLD = 1000;
-const int WATER_LEVEL_THRESHOLD = 20;
+const int SUNLIGHT_THRESHOLD = 500;
+const int WATER_LEVEL_THRESHOLD = 1800;
 
-// Default sensor values
+// Timing
+const unsigned long WATER_NOTIFICATION_INTERVAL = 5000;
+const unsigned long WATERING_DURATION = 3000;
+const unsigned long WATERING_COOLDOWN = 5000;
+const unsigned long LIGHT_SEND_INTERVAL = 60000;  // 1 minute
+const unsigned long DARK_SEND_INTERVAL = 120000;  // 2 minutes
+
+// State
 float temperature = 0.0;
 float humidity = 0.0;
 int ldrValue = 0;
 int moisture = 0;
 int waterLevel = 0;
 
-// Notification timing
 unsigned long lastWaterNotificationTime = 0;
-const unsigned long WATER_NOTIFICATION_INTERVAL = 5000;  // change
-bool waterNotifSent = false;
-bool firstWaterNotificationSent = false;
-
-// Watering control
-bool isWatering = false;
 unsigned long wateringStartTime = 0;
-const unsigned long WATERING_DURATION = 3000;  // change
 unsigned long lastWateringEndTime = 0;
-const unsigned long WATERING_COOLDOWN = 5000;  // change
+unsigned long lastMQTTSendTime = -60000;
+
+bool waterNotifSent = false;
+bool isWatering = false;
 bool hasWateredOnce = false;
 
-// Instances
 WiFiClient espClient;
 PubSubClient client(espClient);
 DHT22 dht(DHT_PIN);
+struct tm localTime;
 
-// Function predefinitions
-void turnLedOn(char color = 'a');
-void setupWifi();
-void reconnect();
-void handleHighTemp();
-void handleDarkness();
-void handleOK();
-void handleLowWaterLevel();
-void waterPlant();
-
-void setup() {
-  // Begin serial communication
-  Serial.begin(115200);
-  Serial.println("Smart pot started!");
-
-  // Connect to WiFi
-  setupWifi();
-
-  // Connect to MQTT server
-  client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
-
-  // Set timezone and start NTP
-  configTime(3600, 3600, ntpServerURL);
-
-  // Wait until time is obtained
-  if (!getLocalTime(&localTime)) {
-    Serial.println("Failed to obtain time!");
-    return;
-  }
-
-  // Input pins
-  pinMode(LDR_PIN, INPUT);
-  pinMode(MOISTURE_PIN, INPUT);
-  pinMode(WATER_LEVEL_PIN, INPUT);
-
-  // Output pins
-  pinMode(RED_LED, OUTPUT);
-  pinMode(GREEN_LED, OUTPUT);
-  pinMode(BLUE_LED, OUTPUT);
-  pinMode(WATER_PUMP_PIN, OUTPUT);
-
-  // Default pin writings
-  digitalWrite(WATER_PUMP_PIN, LOW);
-  turnLedOn();  // All LEDs off
-}
-
-void loop() {
-  // Check if client is connected
-  if (!client.connected()) {
-    reconnect();
-  }
-  client.loop();
-
-  // Default values
-  unsigned long currentMillis = millis();
-  char activeAlert = 'n';  // none
-
-  // Read sensor values
-  temperature = dht.getTemperature();
-  humidity = dht.getHumidity();
-  ldrValue = analogRead(LDR_PIN);
-  moisture = analogRead(MOISTURE_PIN);
-  waterLevel = analogRead(WATER_LEVEL_PIN);
-
-  // Buffer to store published data
-  char dataBuffer[10];
-
-  // Show real-time values in serial
-  Serial.println("------------------------------");
-  Serial.print("Temperature: ");
-  Serial.println(temperature);
-  Serial.print("Humidity: ");
-  Serial.println(humidity);
-  Serial.print("LDR: ");
-  Serial.println(ldrValue);
-  Serial.print("Moisture: ");
-  Serial.println(moisture);
-  Serial.print("Water Level: ");
-  Serial.println(waterLevel);
-  Serial.println("------------------------------");
-
-  // Send real-time values to home assistant
-  // Temperature
-  dtostrf(temperature, 1, 2, dataBuffer);
-  client.publish("okoscserep/temperature", dataBuffer);
-
-  // Humidity
-  dtostrf(humidity, 1, 2, dataBuffer);
-  client.publish("okoscserep/humidity", dataBuffer);
-
-  // Water level
-  sprintf(dataBuffer, "%d", waterLevel);
-  client.publish("okoscserep/water_level", dataBuffer);
-
-  // Soil moisture
-  sprintf(dataBuffer, "%d", moisture);
-  client.publish("okoscserep/soil_moisture", dataBuffer);
-
-  // Sunlight
-  sprintf(dataBuffer, "%d", ldrValue);
-  client.publish("okoscserep/sunlight", dataBuffer);
-
-  Serial.println("MQTT data sent!");
-
-  // Stop watering after duration
-  if (isWatering) {
-    if (currentMillis - wateringStartTime >= WATERING_DURATION) {
-      isWatering = false;
-      digitalWrite(WATER_PUMP_PIN, LOW);
-      lastWateringEndTime = currentMillis;
-      Serial.println("Stopping watering...");
-    } else {
-      return;
-    }
-  }
-
-  // Priority 1: Water level check
-  if (waterLevel <= WATER_LEVEL_THRESHOLD) {
-    if (!firstWaterNotificationSent) {
-      handleLowWaterLevel();
-      lastWaterNotificationTime = currentMillis;
-      waterNotifSent = true;
-      firstWaterNotificationSent = true;
-      activeAlert = 'w';
-    } else if (!waterNotifSent && currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
-      handleLowWaterLevel();
-      lastWaterNotificationTime = currentMillis;
-      waterNotifSent = true;
-      activeAlert = 'w';
-    }
-  }
-
-  // Reset water level notification flag
-  if (currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
-    waterNotifSent = false;
-  }
-
-  // Priority 2: High temperature
-  if (activeAlert == 'n' && temperature >= TEMP_THRESHOLD) {
-    handleHighTemp();
-    activeAlert = 'h';
-  }
-
-  // Priority 3: Moisture-based watering (only if enough water)
-  if (activeAlert == 'n' && !isWatering && (!hasWateredOnce || currentMillis - lastWateringEndTime >= WATERING_COOLDOWN)) {
-    if (moisture <= MOISTURE_THRESHOLD && waterLevel > WATER_LEVEL_THRESHOLD) {
-      waterPlant();
-      activeAlert = 'm';
-      hasWateredOnce = true;
-    }
-  }
-
-  // Priority 4: Darkness check
-  if (activeAlert == 'n' && ldrValue < SUNLIGHT_THRESHOLD) {
-    handleDarkness();
-    activeAlert = 'd';
-  }
-
-  // If nothing else triggered
-  if (activeAlert == 'n') {
-    handleOK();
-  }
-  delay(1000);
-}
-
-// Home assistant functions
 void setupWifi() {
-  Serial.println("Connecting to WiFi - ");
-  Serial.println(WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
   }
-  Serial.println("WiFi connection established!");
 }
 
 void reconnect() {
   while (!client.connected()) {
-    Serial.print("Connecting to MQTT server...");
-    if (client.connect("ESP8266Client", MQTT_USERNAME, MQTT_PASSWORD)) {
-      Serial.println("MQTT server connection established!");
-    } else {
-      Serial.print("Error occured: ");
-      Serial.print(client.state());
-      Serial.println("Retrying in 5 seconds");
-      delay(5000);
+    client.connect("ESP8266Client", MQTT_USERNAME, MQTT_PASSWORD);
+    delay(5000);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  setupWifi();
+  client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
+  configTime(3600, 3600, ntpServerURL);
+
+  getLocalTime(&localTime);
+
+  pinMode(LDR_PIN, INPUT);
+  pinMode(MOISTURE_PIN, INPUT);
+  pinMode(WATER_LEVEL_PIN, INPUT);
+  pinMode(WATER_PUMP_PIN, OUTPUT);
+  digitalWrite(WATER_PUMP_PIN, LOW);
+}
+
+void loop() {
+  if (!client.connected()) reconnect();
+  client.loop();
+
+  unsigned long currentMillis = millis();
+  checkWateringStatus();
+
+  ldrValue = analogRead(LDR_PIN);
+  bool isDark = ldrValue < SUNLIGHT_THRESHOLD;
+  unsigned long sendInterval = isDark ? DARK_SEND_INTERVAL : LIGHT_SEND_INTERVAL;
+
+  if (currentMillis - lastMQTTSendTime >= sendInterval) {
+    lastMQTTSendTime = currentMillis;
+
+    // Read sensors
+    temperature = dht.getTemperature();
+    humidity = dht.getHumidity();
+    moisture = analogRead(MOISTURE_PIN);
+    waterLevel = analogRead(WATER_LEVEL_PIN);
+
+    // Publish to MQTT
+    char dataBuffer[10];
+    dtostrf(temperature, 1, 2, dataBuffer);
+    client.publish("okoscserep/temperature", dataBuffer);
+    dtostrf(humidity, 1, 2, dataBuffer);
+    client.publish("okoscserep/humidity", dataBuffer);
+    sprintf(dataBuffer, "%d", waterLevel);
+    client.publish("okoscserep/water_level", dataBuffer);
+    sprintf(dataBuffer, "%d", moisture);
+    client.publish("okoscserep/soil_moisture", dataBuffer);
+    sprintf(dataBuffer, "%d", isDark);
+    client.publish("okoscserep/sunlight", dataBuffer);
+
+    // Print to serial
+    Serial.print("Light: ");
+    Serial.println(ldrValue);
+    Serial.print("Is Dark? ");
+    Serial.println(isDark);
+    Serial.print("Water Level: ");
+    Serial.println(waterLevel);
+    Serial.print("Soil Moisture: ");
+    Serial.println(moisture);
+
+    handleAutomation(currentMillis);
+
+    // If dark and not watering, go to sleep
+    if (isDark && !isWatering) {
+      delay(200);                                                // Allow MQTT to flush
+      esp_sleep_enable_timer_wakeup(DARK_SEND_INTERVAL * 1000);  // ms to µs
+      esp_light_sleep_start();                                   // Resume from here
     }
   }
+
+  delay(100);
 }
 
-// Utility Functions
-void turnLedOn(char color) {
-  digitalWrite(RED_LED, HIGH);
-  digitalWrite(GREEN_LED, HIGH);
-  digitalWrite(BLUE_LED, HIGH);
-  switch (color) {
-    case 'r':
-      digitalWrite(RED_LED, LOW);
-      break;
-    case 'g':
-      digitalWrite(GREEN_LED, LOW);
-      break;
-    case 'b':
-      digitalWrite(BLUE_LED, LOW);
-      break;
-    default:
-      break;
+void checkWateringStatus() {
+  if (isWatering && millis() - wateringStartTime >= WATERING_DURATION) {
+    isWatering = false;
+    digitalWrite(WATER_PUMP_PIN, LOW);
+    lastWateringEndTime = millis();
   }
 }
 
-void handleHighTemp() {
-  Serial.println("High temperature!");
-  turnLedOn('r');
-}
+void handleAutomation(unsigned long currentMillis) {
+  if (waterLevel <= WATER_LEVEL_THRESHOLD) {
+    if (!waterNotifSent || currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
+      sendNotification("Alacsony vízszint!");
+      lastWaterNotificationTime = currentMillis;
+      waterNotifSent = true;
+    }
+  } else if (moisture <= MOISTURE_THRESHOLD && !isWatering && (currentMillis - lastWateringEndTime >= WATERING_COOLDOWN || !hasWateredOnce)) {
+    waterPlant();
+    hasWateredOnce = true;
+  }
 
-void handleDarkness() {
-  Serial.println("Darkness detected!");
-  turnLedOn('b');
-}
-
-void handleOK() {
-  Serial.println("Everything OK!");
-  turnLedOn('g');
-}
-
-void handleLowWaterLevel() {
-  Serial.println("Water level low!");
-  Serial.println("Sending notification!");
+  if (currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
+    waterNotifSent = false;
+  }
 }
 
 void waterPlant() {
-  Serial.println("Watering plant...");
-  // Get current time
   if (getLocalTime(&localTime)) {
-    // Format time as HH:MM:SS
     char timeBuffer[9];
     sprintf(timeBuffer, "%02d:%02d:%02d", localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
-
-    // Send time to home assistant
     client.publish("okoscserep/last_watering_time", timeBuffer);
-
-    // Show last watering time in serial
-    Serial.print("Last watering time: ");
-    Serial.println(timeBuffer);
   }
 
-  // Actual watering
   isWatering = true;
-  digitalWrite(WATER_PUMP_PIN, HIGH);  // Activate pump
+  digitalWrite(WATER_PUMP_PIN, HIGH);
   wateringStartTime = millis();
+  Serial.println("Starting to water the plant now");
+}
+
+void sendNotification(String message) {
+  Serial.println(message);
 }
