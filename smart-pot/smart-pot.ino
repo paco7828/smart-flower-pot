@@ -24,15 +24,14 @@ const byte DHT_PIN = 4;
 
 // Thresholds
 const int MOISTURE_THRESHOLD = 2000;
-const int SUNLIGHT_THRESHOLD = 500;
-const int WATER_LEVEL_THRESHOLD = 1800;
+const int SUNLIGHT_THRESHOLD = 1000;
+const int WATER_LEVEL_THRESHOLD = 1700;
 
 // Timing
-const unsigned long WATER_NOTIFICATION_INTERVAL = 50000;
-const unsigned long WATERING_DURATION = 3000;
-const unsigned long WATERING_COOLDOWN = 5000;
-const unsigned long LIGHT_SEND_INTERVAL = 60000;  // 1 minute
-const unsigned long DARK_SEND_INTERVAL = 120000;  // 2 minutes
+const unsigned long WATER_NOTIFICATION_INTERVAL = 86400000UL;  // 24 hours
+const unsigned long WATERING_DURATION = 5000;                  // 5 seconds
+const unsigned long LIGHT_SEND_INTERVAL = 60000;               // 1 minute
+const unsigned long DARK_SEND_INTERVAL = 600000UL;             // 10 minutes
 
 // State
 float temperature = 0.0;
@@ -43,12 +42,10 @@ int waterLevel = 0;
 
 unsigned long lastWaterNotificationTime = 0;
 unsigned long wateringStartTime = 0;
-unsigned long lastWateringEndTime = 0;
 unsigned long lastMQTTSendTime = -60000;
 
 bool waterNotifSent = false;
 bool isWatering = false;
-bool hasWateredOnce = false;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -91,7 +88,7 @@ void loop() {
   checkWateringStatus();
 
   ldrValue = analogRead(LDR_PIN);
-  bool isDark = ldrValue < SUNLIGHT_THRESHOLD;
+  bool isDark = ldrValue <= SUNLIGHT_THRESHOLD;
   unsigned long sendInterval = isDark ? DARK_SEND_INTERVAL : LIGHT_SEND_INTERVAL;
 
   if (currentMillis - lastMQTTSendTime >= sendInterval) {
@@ -133,7 +130,6 @@ void checkWateringStatus() {
   if (isWatering && millis() - wateringStartTime >= WATERING_DURATION) {
     isWatering = false;
     digitalWrite(WATER_PUMP_PIN, LOW);
-    lastWateringEndTime = millis();
   }
 }
 
@@ -146,9 +142,8 @@ void handleAutomation(unsigned long currentMillis) {
     }
   }
 
-  if (moisture <= MOISTURE_THRESHOLD && !isWatering && (currentMillis - lastWateringEndTime >= WATERING_COOLDOWN || !hasWateredOnce)) {
+  if (moisture >= MOISTURE_THRESHOLD && !isWatering) {
     waterPlant();
-    hasWateredOnce = true;
   }
 
   if (currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
