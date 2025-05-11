@@ -41,5 +41,4 @@ Water level sensor S+ -> ESP32 C3 SUPERMINI GPIO 2
 2N2222 Base -> 1k resistor -> ESP32 C3 SUPER MINI GPIO 3
 2N2222 Collector -> Water pump -
 
-Water pump + -> ESP32 C3 SUPERMINI GPIO 3
-Water pump - -> ESP32 C3 SUPERMINI GND
+Water pump + -> ESP32 C3 SUPERMINI 3.3V
