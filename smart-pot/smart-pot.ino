@@ -24,7 +24,7 @@ const byte DHT_PIN = 4;
 
 // Thresholds
 const int MOISTURE_THRESHOLD = 2000;
-const int SUNLIGHT_THRESHOLD = 1000;
+const int SUNLIGHT_THRESHOLD = 3000;
 const int WATER_LEVEL_THRESHOLD = 1700;
 
 // Timing
