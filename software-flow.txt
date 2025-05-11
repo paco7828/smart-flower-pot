@@ -1,19 +1,13 @@
 Power:
-	Solar panel outside -> battery charger ->  battery -> boost converter (stable 3.3V) -> ESP32 C3 SUPERMINI
+	Solar panel outside -> battery charger ->  battery -> boost converter (stable 5V) -> ESP32 C3 SUPERMINI
 
 Software flow:
 
-	ESP32 C3 SUPERMINI wakes up from light sleep every 30 seconds and reads sensors
-
-	RGB led:
-		-if low moisture -> blinks in red
-		-if temp too high -> glows in red
-		-if no sunlight -> glows in blue
-        -if moisture + temp OK + sunlight present -> glows in green
+	ESP32 C3 SUPERMINI handles tasks every 60 seconds
 
 	LDR:
-		-sunlight detected -> enable screen backlight
-		-no sunlight detected -> disable screen backlight
+		-sunlight detected -> wakes up every 1 minutes
+		-no sunlight detected -> wakes up every 10 minutes
 
 	Water level sensor:
 		-water level below 20% -> sends notification through home assistant

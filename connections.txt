@@ -3,15 +3,26 @@ Battery charger IN- -> Solar Panel -
 Battery charger B+ -> Battery holder +
 Battery charger B- -> Battery holder -
 
+Schottky diode + -> Battery charger B+
+Schottky diode - -> Battery holder +
+
+100uF capacitor + -> Solar Panel +
+100uF capcatiro - -> Solar Panel -
+
+100uF capacitor + -> Battery holder +
+100uF capacitor - -> Battery holder -
+
 Step up converter VIN+ -> Battery holder +
 Step up converter VIN- -> Battery holder -
 Step up converter VOUT+ -> ESP32 C3 SUPERMINI 5V
 Step up converter VOUT- -> ESP32 C3 SUPERMINI GND
 
-BME280 VCC -> ESP32 C3 SUPERMINI 3.3V
-BME280 GND -> ESP32 C3 SUPERMINI GND
-BME280 SDA -> ESP32 C3 SUPERMINI GPIO 8
-BME280 SCL -> ESP32 C3 SUPERMINI GPIO 9
+Schottky diode + -> Step up converter VOUT+
+Schottky diode - -> ESP32 C3 SUPERMINI 5V
+
+DHT22 VCC -> ESP32 C3 SUPERMINI 3.3V
+DHT22 DATA -> ESP32 C3 SUPERMINI GPIO 4
+DHT22 GND -> ESP32 C3 SUPERMINI GND
 
 Capacitive soil moisture sensor VCC -> ESP32 C3 SUPERMINI 3.3V
 Capacitive soil moisture sensor GND -> ESP32 C3 SUPERMINI GND
@@ -28,8 +39,3 @@ Water level sensor S+ -> ESP32 C3 SUPERMINI GPIO 2
 
 Water pump + -> ESP32 C3 SUPERMINI GPIO 3
 Water pump - -> ESP32 C3 SUPERMINI GND
-
-RGB LED R -> ESP32 C3 SUPERMINI GPIO 5
-RGB LED G -> ESP32 C3 SUPERMINI GPIO 6
-RGB LED B -> ESP32 C3 SUPERMINI GPIO 7
-RGB LED cathode -> ESP32 C3 SUPERMINI GND
