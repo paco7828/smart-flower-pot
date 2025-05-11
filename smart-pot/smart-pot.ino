@@ -28,7 +28,7 @@ const int SUNLIGHT_THRESHOLD = 500;
 const int WATER_LEVEL_THRESHOLD = 1800;
 
 // Timing
-const unsigned long WATER_NOTIFICATION_INTERVAL = 5000;
+const unsigned long WATER_NOTIFICATION_INTERVAL = 50000;
 const unsigned long WATERING_DURATION = 3000;
 const unsigned long WATERING_COOLDOWN = 5000;
 const unsigned long LIGHT_SEND_INTERVAL = 60000;  // 1 minute
@@ -144,7 +144,9 @@ void handleAutomation(unsigned long currentMillis) {
       lastWaterNotificationTime = currentMillis;
       waterNotifSent = true;
     }
-  } else if (moisture <= MOISTURE_THRESHOLD && !isWatering && (currentMillis - lastWateringEndTime >= WATERING_COOLDOWN || !hasWateredOnce)) {
+  }
+
+  if (moisture <= MOISTURE_THRESHOLD && !isWatering && (currentMillis - lastWateringEndTime >= WATERING_COOLDOWN || !hasWateredOnce)) {
     waterPlant();
     hasWateredOnce = true;
   }
@@ -168,6 +170,6 @@ void waterPlant() {
 
 void sendNotification() {
   client.publish("smart_flower_pot/notify", "ON");
-  delay(2000);
+  delay(1000);
   client.publish("smart_flower_pot/notify", "OFF");
 }
