@@ -1,0 +1,25 @@
+3x JST connector 2 pin 2.5mm - https://www.hestore.hu/prod_10041549.html
+3x JST cable 2 pin 2.5mm - https://www.hestore.hu/prod_10041603.html
+2x 47uF capacitor - https://www.hestore.hu/prod_10042066.html
+3x SS14 - https://www.hestore.hu/prod_10039694.html
+1x USB-C 6 pin - https://www.hestore.hu/prod_10046971.html
+1x Green LED - https://www.hestore.hu/prod_10036384.html
+1x Red LED - https://www.hestore.hu/prod_10043215.html
+3x 1kR resistor - https://www.hestore.hu/prod_10031299.html
+3x 10uF capacitor - https://www.hestore.hu/prod_10032047.html
+1x TP4056 - https://www.hestore.hu/prod_10037291.html
+1x 1.2kR resistor - https://www.hestore.hu/prod_10001268.html
+1x DW01A - https://www.hestore.hu/prod_10046612.html
+1x 8205A - https://www.hestore.hu/prod_10045032.html
+1x 4.7uF capacitor - https://www.hestore.hu/prod_10033975.html
+1x 4.7uH inductor - https://www.hestore.hu/prod_10039255.html
+1x MCP1624T-I/CHY - https://www.hestore.hu/prod_10032041.html
+1x 1.5MR resistor - https://www.hestore.hu/prod_10001251.html
+1x 470kR resistor - https://www.hestore.hu/prod_10001179.html
+1x DHT22 - https://www.temu.com/hu/1-3-5-db-digit%C3%A1lis-h%C5%91m%C3%A9rs%C3%A9klet-%C3%A9s-p%C3%A1ratartalom%C3%A9rz%C3%A9kel%C5%91---%C3%A9rz%C3%A9kel%C5%91-modul-arduino-elektronikai-diy-hez-g-601100463198672.html?_oak_mp_inf=ENCj1dyp1ogBGiA1YWEyODdiZGM2MTc0OTQwYWZkZTAyMTI4N2MzMTM4ZCC4ieyK6TI%3D&top_gallery_url=https%3A%2F%2Fimg.kwcdn.com%2Fproduct%2Ffancy%2F9b9e02ab-675d-4b2f-9c8a-3bc42c074153.jpg&spec_gallery_id=7698329065&refer_page_sn=10009&refer_source=0&freesia_scene=2&_oak_freesia_scene=2&_oak_rec_ext_1=ODgzMDA&search_key=temperature%20and%20humidity%20sensor%20DHT22&refer_page_el_sn=200049&refer_page_name=search_result&refer_page_id=10009_1746195372401_hjoj9j07d8&_x_sessn_id=p7kvj0eg78
+1x ESP32 C3 SUPERMINI - https://www.temu.com/hu/esp32-c3-szuper-mini-fejleszt%C5%91i-k%C3%A1rtya-usb-t%C3%A1pell%C3%A1t%C3%A1s-alacsony-fesz%C3%BClts%C3%A9g-nem-sz%C3%BCks%C3%A9ges-elem-g-601099588295925.html?_oak_name_id=6730895474927349375&_oak_mp_inf=EPW5vbum1ogBGiA4NDE0MjA3NDAxYjk0MGYxYTczZDUzMWQ0M2ZmOTUyMiDG%2Fr%2BK6TI%3D&top_gallery_url=https%3A%2F%2Fimg.kwcdn.com%2Fproduct%2Ffancy%2Fbcd49f20-764b-4066-8dd4-855a72f0c619.jpg&spec_gallery_id=4192751042&refer_page_sn=10009&refer_source=0&freesia_scene=2&_oak_freesia_scene=2&_oak_rec_ext_1=MTI4MzAw&search_key=esp32%20c3%20super%20mini&refer_page_el_sn=200049&refer_page_name=search_result&refer_page_id=10009_1746194637019_nle6hheatl&_x_sessn_id=p7kvj0eg78
+2x JST connector 3 pin 2.5mm - https://www.hestore.hu/prod_10041550.html
+2x JST cable 3 pin 2.5mm - https://www.hestore.hu/prod_10041604.html
+1x 10kR resistor - https://www.hestore.hu/prod_10001145.html
+1x LDR - https://www.hestore.hu/prod_10036399.html
+1x NPN transistor - https://www.hestore.hu/prod_10020924.html
