@@ -1,0 +1,19 @@
+Components:
+     - Stronger water pump -> R385:
+         - Install step up converter (3.7V battery to 9V for the pump)
+         - Converter circuit is only activated when watering should happen (ESP32 GPIO switches circuit)
+
+     - 
+
+PCB:
+     - Change 1k resistors' size from 0805 to 0402
+     - Change inductor with bigger value - https://www.hestore.hu/prod_10038580.html
+     - Change leds' size from 0805 to 0402
+     - Change SS14 schottky diodes to ->  https://www.hestore.hu/prod_10046229.html
+     - Change LDR to TEMT6000 (with 10k resistor)
+     - Change 10k resistor's size from 0805 to 0402
+     - Change DHT22 to -> DS18B20+
+     - Change JST connectors:
+         - B2B-XH-A -> B2B-ZR + 
+         - B3B-XH-A -> B3B-ZR + 
+        
