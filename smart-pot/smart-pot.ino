@@ -34,7 +34,7 @@ const unsigned long WATERING_DURATION = 5000;                  // 5 seconds
 const unsigned long LIGHT_SEND_INTERVAL = 60000;               // 1 minute
 const unsigned long DARK_SEND_INTERVAL = 600000UL;             // 10 minutes
 const unsigned long AP_TIMEOUT = 180000UL;                     // 3 minutes for AP mode
-const unsigned long WIFI_RETRY_INTERVAL = 10000;             // 30 seconds between WiFi connection attempts
+const unsigned long WIFI_RETRY_INTERVAL = 30000;               // 30 seconds between WiFi connection attempts
 
 // Default values
 float temperature = 0.0;
@@ -51,16 +51,17 @@ const char* AP_SSID = "Smart-flower-pot";
 
 // Connection state management
 enum WiFiState {
-  WIFI_AP_MODE,
-  WIFI_CONNECTING,
-  WIFI_CONNECTED,
-  WIFI_FAILED
+  WIFI_AP_ONLY,        // AP mode only (first 3 minutes)
+  WIFI_AP_AND_STA,     // AP + trying to connect to saved WiFi
+  WIFI_CONNECTED,      // Connected to WiFi (AP may still be running)
+  WIFI_FAILED          // WiFi connection failed, running on AP only
 };
 
-WiFiState currentWiFiState = WIFI_AP_MODE;
+WiFiState currentWiFiState = WIFI_AP_ONLY;
 unsigned long apStartTime = 0;
 unsigned long lastWiFiAttempt = 0;
 bool credentialsSaved = false;
+bool apModeActive = false;
 String savedSSID = "";
 String savedPassword = "";
 
@@ -91,10 +92,12 @@ bool loadWiFiCredentials() {
   return (savedSSID != "" && savedPassword != "");
 }
 
-// Function to start Access Point
+// Function to start Access Point - ALWAYS CALLED ON STARTUP
 void startAccessPoint() {
   Serial.println("Starting Access Point...");
-  WiFi.mode(WIFI_MODE_AP);
+  
+  // Set to AP+STA mode so we can have both AP and try WiFi connection
+  WiFi.mode(WIFI_AP_STA);
   WiFi.softAPConfig(localIP, gatewayIP, subnet);
   WiFi.softAP(AP_SSID);
 
@@ -102,11 +105,31 @@ void startAccessPoint() {
   setupWebServer();
 
   apStartTime = millis();
-  currentWiFiState = WIFI_AP_MODE;
+  apModeActive = true;
+  currentWiFiState = WIFI_AP_ONLY;
 
   Serial.println("Access Point started: " + String(AP_SSID));
-  Serial.println("IP address: " + WiFi.softAPIP().toString());
+  Serial.println("AP IP address: " + WiFi.softAPIP().toString());
   Serial.println("Connect to WiFi and open http://4.3.2.1");
+}
+
+// Function to stop Access Point after timeout
+void stopAccessPoint() {
+  if (apModeActive) {
+    Serial.println("Stopping Access Point (3 minute timeout reached)...");
+    dnsServer.stop();
+    server.end();
+    WiFi.softAPdisconnect(true);
+    apModeActive = false;
+    
+    // Switch to STA mode only if we have WiFi connection
+    if (WiFi.status() == WL_CONNECTED) {
+      WiFi.mode(WIFI_STA);
+      Serial.println("Switched to STA mode only");
+    } else {
+      Serial.println("No WiFi connection, staying in mixed mode");
+    }
+  }
 }
 
 // Function to attempt WiFi connection
@@ -117,9 +140,14 @@ void attemptWiFiConnection() {
   }
 
   Serial.println("Attempting to connect to WiFi: " + savedSSID);
-  currentWiFiState = WIFI_CONNECTING;
-
-  WiFi.mode(WIFI_MODE_STA);
+  
+  // If AP is still active, use AP+STA mode, otherwise use STA mode
+  if (apModeActive) {
+    WiFi.mode(WIFI_AP_STA);
+  } else {
+    WiFi.mode(WIFI_STA);
+  }
+  
   WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
 
   // Wait up to 20 seconds for connection
@@ -128,16 +156,17 @@ void attemptWiFiConnection() {
     delay(500);
     Serial.print(".");
     attempts++;
+    
+    // Continue processing AP requests during connection attempt
+    if (apModeActive) {
+      dnsServer.processNextRequest();
+    }
   }
 
   if (WiFi.status() == WL_CONNECTED) {
     currentWiFiState = WIFI_CONNECTED;
     Serial.println("\nWiFi connected successfully!");
-    Serial.println("IP address: " + WiFi.localIP().toString());
-
-    // Stop AP mode and DNS server if they were running
-    dnsServer.stop();
-    server.end();
+    Serial.println("WiFi IP address: " + WiFi.localIP().toString());
 
     // Initialize MQTT and sensors
     client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
@@ -175,7 +204,7 @@ void setupWebServer() {
     if (request->hasParam("username", true)) ssid = request->getParam("username", true)->value();
     if (request->hasParam("password", true)) password = request->getParam("password", true)->value();
 
-    Serial.println("Received credentials:");
+    Serial.println("Received new credentials:");
     Serial.println("SSID: " + ssid);
     Serial.println("Password: [hidden]");
 
@@ -196,7 +225,7 @@ void setupWebServer() {
     savedPassword = password;
     credentialsSaved = true;
 
-    Serial.println("Credentials saved to flash memory.");
+    Serial.println("New credentials saved to flash memory.");
 
     // Send success response
     AsyncWebServerResponse* response = request->beginResponse(200, "text/html", success_html);
@@ -224,7 +253,7 @@ void setupWebServer() {
 
 // Function to connect to MQTT in home assistant
 void reconnect() {
-  while (!client.connected()) {
+  while (!client.connected() && WiFi.status() == WL_CONNECTED) {
     Serial.print("Attempting MQTT connection...");
     if (client.connect("smart_flower_pot", MQTT_USERNAME, MQTT_PASSWORD)) {
       Serial.println("connected");
@@ -242,22 +271,25 @@ void setup() {
   delay(1000);
 
   Serial.println("Smart Flower Pot starting...");
+  Serial.println("=================================");
+  Serial.println("AP will be available for 3 minutes on every startup");
 
   // Load existing credentials
   bool hasCredentials = loadWiFiCredentials();
 
   if (hasCredentials) {
-    Serial.println("Found saved WiFi credentials");
+    Serial.println("Found saved WiFi credentials for: " + savedSSID);
   } else {
     Serial.println("No saved WiFi credentials found");
   }
 
-  // Always start AP mode first
+  // ALWAYS start AP mode first on every power-up
   startAccessPoint();
 
-  // If we have credentials, also try to connect to WiFi
+  // If we have credentials, also try to connect to WiFi immediately
   if (hasCredentials) {
-    delay(2000);  // Give AP time to start
+    delay(2000);  // Give AP time to fully start
+    currentWiFiState = WIFI_AP_AND_STA;
     attemptWiFiConnection();
   }
 }
@@ -265,42 +297,73 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
+  // ALWAYS process DNS requests while AP is active
+  if (apModeActive) {
+    dnsServer.processNextRequest();
+    
+    // Check if AP timeout reached (3 minutes)
+    if (currentMillis - apStartTime >= AP_TIMEOUT) {
+      stopAccessPoint();
+    }
+  }
+
   // Handle different WiFi states
   switch (currentWiFiState) {
-    case WIFI_AP_MODE:
-      // Process captive portal
-      dnsServer.processNextRequest();
-
-      // Check if AP timeout reached
-      if (currentMillis - apStartTime >= AP_TIMEOUT && !credentialsSaved) {
-        Serial.println("AP timeout reached, checking for saved credentials...");
-        if (loadWiFiCredentials()) {
-          attemptWiFiConnection();
-        } else {
-          Serial.println("No credentials found, restarting AP...");
-          apStartTime = currentMillis;  // Reset AP timer
-        }
-      }
-
+    case WIFI_AP_ONLY:
+      // Only AP mode active, waiting for credentials or timeout
+      
       // If credentials were just saved, attempt connection
       if (credentialsSaved) {
         credentialsSaved = false;
+        currentWiFiState = WIFI_AP_AND_STA;
         delay(2000);  // Give time for success page to be served
+        attemptWiFiConnection();
+      }
+      
+      // Check if we have saved credentials and should try connecting
+      else if (loadWiFiCredentials()) {
+        currentWiFiState = WIFI_AP_AND_STA;
         attemptWiFiConnection();
       }
       break;
 
-    case WIFI_CONNECTING:
-      // Connection attempt is handled in attemptWiFiConnection()
-      // This state should be brief
+    case WIFI_AP_AND_STA:
+      // AP is running AND we're trying to connect to WiFi
+      
+      // If credentials were just saved, attempt new connection
+      if (credentialsSaved) {
+        credentialsSaved = false;
+        delay(2000);  // Give time for success page to be served
+        
+        // Disconnect from current WiFi and try new credentials
+        WiFi.disconnect();
+        delay(1000);
+        attemptWiFiConnection();
+      }
       break;
 
     case WIFI_CONNECTED:
-      // Normal operation mode
+      // Connected to WiFi (AP may still be running for the first 3 minutes)
+      
+      // Check if WiFi connection is still alive
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("WiFi connection lost!");
         currentWiFiState = WIFI_FAILED;
         lastWiFiAttempt = currentMillis;
+        break;
+      }
+
+      // Handle new credentials even when connected
+      if (credentialsSaved) {
+        credentialsSaved = false;
+        Serial.println("New credentials received, reconnecting...");
+        delay(2000);  // Give time for success page to be served
+        
+        // Disconnect and try new credentials
+        WiFi.disconnect();
+        delay(1000);
+        currentWiFiState = apModeActive ? WIFI_AP_AND_STA : WIFI_FAILED;
+        attemptWiFiConnection();
         break;
       }
 
@@ -315,9 +378,20 @@ void loop() {
       break;
 
     case WIFI_FAILED:
+      // WiFi connection failed, retry periodically
+      
+      // Handle new credentials
+      if (credentialsSaved) {
+        credentialsSaved = false;
+        delay(2000);  // Give time for success page to be served
+        currentWiFiState = apModeActive ? WIFI_AP_AND_STA : WIFI_FAILED;
+        attemptWiFiConnection();
+      }
+      
       // Retry WiFi connection periodically
-      if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL) {
+      else if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL) {
         Serial.println("Retrying WiFi connection...");
+        currentWiFiState = apModeActive ? WIFI_AP_AND_STA : WIFI_FAILED;
         attemptWiFiConnection();
       }
       break;
