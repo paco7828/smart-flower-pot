@@ -57,6 +57,7 @@ enum WiFiState {
   WIFI_FAILED          // WiFi connection failed, running on AP only
 };
 
+// AP & Wifi variables
 WiFiState currentWiFiState = WIFI_AP_ONLY;
 unsigned long apStartTime = 0;
 unsigned long lastWiFiAttempt = 0;
@@ -94,8 +95,6 @@ bool loadWiFiCredentials() {
 
 // Function to start Access Point - ALWAYS CALLED ON STARTUP
 void startAccessPoint() {
-  Serial.println("Starting Access Point...");
-  
   // Set to AP+STA mode so we can have both AP and try WiFi connection
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAPConfig(localIP, gatewayIP, subnet);
@@ -107,16 +106,11 @@ void startAccessPoint() {
   apStartTime = millis();
   apModeActive = true;
   currentWiFiState = WIFI_AP_ONLY;
-
-  Serial.println("Access Point started: " + String(AP_SSID));
-  Serial.println("AP IP address: " + WiFi.softAPIP().toString());
-  Serial.println("Connect to WiFi and open http://4.3.2.1");
 }
 
 // Function to stop Access Point after timeout
 void stopAccessPoint() {
   if (apModeActive) {
-    Serial.println("Stopping Access Point (3 minute timeout reached)...");
     dnsServer.stop();
     server.end();
     WiFi.softAPdisconnect(true);
@@ -125,9 +119,6 @@ void stopAccessPoint() {
     // Switch to STA mode only if we have WiFi connection
     if (WiFi.status() == WL_CONNECTED) {
       WiFi.mode(WIFI_STA);
-      Serial.println("Switched to STA mode only");
-    } else {
-      Serial.println("No WiFi connection, staying in mixed mode");
     }
   }
 }
@@ -135,11 +126,8 @@ void stopAccessPoint() {
 // Function to attempt WiFi connection
 void attemptWiFiConnection() {
   if (savedSSID == "" || savedPassword == "") {
-    Serial.println("No credentials available for WiFi connection");
     return;
   }
-
-  Serial.println("Attempting to connect to WiFi: " + savedSSID);
   
   // If AP is still active, use AP+STA mode, otherwise use STA mode
   if (apModeActive) {
@@ -154,7 +142,6 @@ void attemptWiFiConnection() {
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 40) {
     delay(500);
-    Serial.print(".");
     attempts++;
     
     // Continue processing AP requests during connection attempt
@@ -165,8 +152,6 @@ void attemptWiFiConnection() {
 
   if (WiFi.status() == WL_CONNECTED) {
     currentWiFiState = WIFI_CONNECTED;
-    Serial.println("\nWiFi connected successfully!");
-    Serial.println("WiFi IP address: " + WiFi.localIP().toString());
 
     // Initialize MQTT and sensors
     client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
@@ -176,7 +161,6 @@ void attemptWiFiConnection() {
 
   } else {
     currentWiFiState = WIFI_FAILED;
-    Serial.println("\nFailed to connect to WiFi");
     lastWiFiAttempt = millis();
   }
 }
@@ -204,10 +188,6 @@ void setupWebServer() {
     if (request->hasParam("username", true)) ssid = request->getParam("username", true)->value();
     if (request->hasParam("password", true)) password = request->getParam("password", true)->value();
 
-    Serial.println("Received new credentials:");
-    Serial.println("SSID: " + ssid);
-    Serial.println("Password: [hidden]");
-
     // Validate inputs
     if (ssid.length() == 0 || password.length() == 0) {
       request->send(400, "text/plain", "Invalid credentials");
@@ -225,14 +205,10 @@ void setupWebServer() {
     savedPassword = password;
     credentialsSaved = true;
 
-    Serial.println("New credentials saved to flash memory.");
-
     // Send success response
     AsyncWebServerResponse* response = request->beginResponse(200, "text/html", success_html);
     response->addHeader("Cache-Control", "no-cache");
     request->send(response);
-
-    Serial.println("Success page sent. Will attempt WiFi connection shortly...");
   });
 
   // Handle CORS for AJAX requests
@@ -254,34 +230,13 @@ void setupWebServer() {
 // Function to connect to MQTT in home assistant
 void reconnect() {
   while (!client.connected() && WiFi.status() == WL_CONNECTED) {
-    Serial.print("Attempting MQTT connection...");
-    if (client.connect("smart_flower_pot", MQTT_USERNAME, MQTT_PASSWORD)) {
-      Serial.println("connected");
-    } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      delay(5000);
-    }
+    client.connect("smart_flower_pot", MQTT_USERNAME, MQTT_PASSWORD)
   }
 }
 
 void setup() {
-  Serial.begin(115200);
-  delay(1000);
-
-  Serial.println("Smart Flower Pot starting...");
-  Serial.println("=================================");
-  Serial.println("AP will be available for 3 minutes on every startup");
-
   // Load existing credentials
   bool hasCredentials = loadWiFiCredentials();
-
-  if (hasCredentials) {
-    Serial.println("Found saved WiFi credentials for: " + savedSSID);
-  } else {
-    Serial.println("No saved WiFi credentials found");
-  }
 
   // ALWAYS start AP mode first on every power-up
   startAccessPoint();
@@ -347,7 +302,6 @@ void loop() {
       
       // Check if WiFi connection is still alive
       if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("WiFi connection lost!");
         currentWiFiState = WIFI_FAILED;
         lastWiFiAttempt = currentMillis;
         break;
@@ -356,7 +310,6 @@ void loop() {
       // Handle new credentials even when connected
       if (credentialsSaved) {
         credentialsSaved = false;
-        Serial.println("New credentials received, reconnecting...");
         delay(2000);  // Give time for success page to be served
         
         // Disconnect and try new credentials
@@ -390,7 +343,6 @@ void loop() {
       
       // Retry WiFi connection periodically
       else if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL) {
-        Serial.println("Retrying WiFi connection...");
         currentWiFiState = apModeActive ? WIFI_AP_AND_STA : WIFI_FAILED;
         attemptWiFiConnection();
       }
