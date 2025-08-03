@@ -3,7 +3,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>WiFi Setup</title>
+  <title>Smart Flower Pot Setup</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
@@ -14,14 +14,27 @@ const char index_html[] PROGMEM = R"rawliteral(
       margin: 0;
     }
     .container {
-      max-width: 400px;
+      max-width: 450px;
       margin: 0 auto;
+      margin-bottom: 400px;
     }
     form {
       background: white;
       padding: 2em;
       border-radius: 10px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+    .section {
+      margin: 2em 0;
+      padding: 1em;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      background-color: #fafafa;
+    }
+    .section h3 {
+      margin-top: 0;
+      color: #333;
+      font-size: 1.1em;
     }
     .input-group {
       position: relative;
@@ -32,7 +45,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       margin: 0 auto;
       padding: 0.7em;
       width: 100%;
-      max-width: 300px;
+      max-width: 350px;
       border-radius: 5px;
       border: 1px solid #ccc;
       font-size: 1em;
@@ -43,27 +56,18 @@ const char index_html[] PROGMEM = R"rawliteral(
       border-color: #28a745;
       box-shadow: 0 0 5px rgba(40, 167, 69, 0.3);
     }
-    .password-container {
-      position: relative;
-      display: inline-block;
-      width: 100%;
-      max-width: 300px;
+    .input-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: center;
     }
-    .toggle-password {
-      position: absolute;
-      right: 10px;
-      top: 50%;
-      transform: translateY(-50%);
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 0.9em;
-      color: #666;
-      padding: 0;
-      width: auto;
+    .input-row input {
+      flex: 1;
+      margin: 0;
     }
-    .toggle-password:hover {
-      color: #28a745;
+    .input-row input[type="number"] {
+      max-width: 100px;
     }
     button[type="submit"] {
       padding: 0.7em 2em;
@@ -93,42 +97,55 @@ const char index_html[] PROGMEM = R"rawliteral(
       margin-top: 1em;
       display: none;
     }
+    .small-text {
+      font-size: 0.9em;
+      color: #666;
+      margin-top: 0.5em;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>Smart Flower Pot WiFi Setup</h2>
-    <form id="wifiForm" action="/login" method="POST">
-      <div class="input-group">
-        <input type="text" name="username" id="ssid" placeholder="WiFi SSID" required>
-      </div>
-      <div class="input-group">
-        <div class="password-container">
-          <input type="password" name="password" id="password" placeholder="WiFi Password" required>
-          <button type="button" class="toggle-password" onclick="togglePassword()">👁️</button>
+    <h2>Smart Flower Pot Setup</h2>
+    <form id="configForm" action="/config" method="POST">
+      
+      <!-- WiFi Configuration Section -->
+      <div class="section">
+        <h3>WiFi Configuration</h3>
+        <div class="input-group">
+          <input type="text" name="wifi_ssid" id="wifi_ssid" placeholder="WiFi SSID" required>
+        </div>
+        <div class="input-group">
+          <input type="text" name="wifi_password" id="wifi_password" placeholder="WiFi Password" required>
         </div>
       </div>
-      <button type="submit" id="submitBtn">Save</button>
-      <div class="loading" id="loading">Saving credentials...</div>
-      <div class="error" id="error">Failed to save credentials. Please try again.</div>
+
+      <!-- MQTT Configuration Section -->
+      <div class="section">
+        <h3>MQTT Broker Configuration</h3>
+        <div class="input-group">
+          <div class="input-row">
+            <input type="text" name="mqtt_server" id="mqtt_server" placeholder="MQTT Server IP" value="192.168.31.31" required>
+            <input type="number" name="mqtt_port" id="mqtt_port" placeholder="Port" value="1883" min="1" max="65535" required>
+          </div>
+          <div class="small-text">Server IP address and port number</div>
+        </div>
+        <div class="input-group">
+          <input type="text" name="mqtt_username" id="mqtt_username" placeholder="MQTT Username" value="okos-cserep" required>
+        </div>
+        <div class="input-group">
+          <input type="text" name="mqtt_password" id="mqtt_password" placeholder="MQTT Password" value="okoscserep123" required>
+        </div>
+      </div>
+
+      <button type="submit" id="submitBtn">Save Configuration</button>
+      <div class="loading" id="loading">Saving configuration...</div>
+      <div class="error" id="error">Failed to save configuration. Please try again.</div>
     </form>
   </div>
 
   <script>
-    function togglePassword() {
-      const passwordInput = document.getElementById('password');
-      const toggleBtn = document.querySelector('.toggle-password');
-      
-      if (passwordInput.type === 'password') {
-        passwordInput.type = 'text';
-        toggleBtn.textContent = '🙈';
-      } else {
-        passwordInput.type = 'password';
-        toggleBtn.textContent = '👁️';
-      }
-    }
-
-    document.getElementById('wifiForm').addEventListener('submit', function(e) {
+    document.getElementById('configForm').addEventListener('submit', function(e) {
       e.preventDefault();
       
       const submitBtn = document.getElementById('submitBtn');
@@ -146,23 +163,23 @@ const char index_html[] PROGMEM = R"rawliteral(
       const formData = new FormData(this);
       
       // Submit the form
-      fetch('/login', {
+      fetch('/config', {
         method: 'POST',
         body: formData
       })
       .then(response => {
         if (response.ok) {
           // Success - show success message and close
-          loading.innerHTML = 'Credentials saved! Closing...';
+          loading.innerHTML = 'Configuration saved! Device restarting...';
           setTimeout(() => {
             // Try to close the captive portal page
             if (window.opener) {
               window.close();
             } else {
               // If we can't close, redirect to a blank page
-              document.body.innerHTML = '<div style="text-align:center; padding:2em; font-family:sans-serif;"><h2>WiFi credentials saved!</h2><p>You can now close this window/tab.</p><p>The device will connect to your network shortly.</p></div>';
+              document.body.innerHTML = '<div style="text-align:center; padding:2em; font-family:sans-serif;"><h2>Configuration saved!</h2><p>You can now close this window/tab.</p><p>The device will connect to your network and MQTT broker shortly.</p></div>';
             }
-          }, 2000);
+          }, 3000);
         } else {
           throw new Error('Network response was not ok');
         }
@@ -176,8 +193,8 @@ const char index_html[] PROGMEM = R"rawliteral(
       });
     });
 
-    // Auto-focus on SSID input
-    document.getElementById('ssid').focus();
+    // Auto-focus on WiFi SSID input
+    document.getElementById('wifi_ssid').focus();
   </script>
 </body>
 </html>
@@ -188,7 +205,7 @@ const char success_html[] PROGMEM = R"rawliteral(
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>WiFi Saved</title>
+  <title>Configuration Saved</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
@@ -221,21 +238,22 @@ const char success_html[] PROGMEM = R"rawliteral(
     }
   </style>
   <script>
-    // Auto-close after 3 seconds
+    // Auto-close after 5 seconds
     setTimeout(function() {
       if (window.opener) {
         window.close();
       } else {
-        document.body.innerHTML = '<div class="message"><h2>Success!</h2><p>You can now close this window/tab.</p><p>The device is connecting to your WiFi network.</p></div>';
+        document.body.innerHTML = '<div class="message"><h2>Success!</h2><p>You can now close this window/tab.</p><p>The device is connecting to your WiFi network and MQTT broker.</p></div>';
       }
-    }, 3000);
+    }, 5000);
   </script>
 </head>
 <body>
   <div class="message">
-    <h2>WiFi credentials saved!</h2>
+    <h2>Configuration saved!</h2>
     <div class="spinner"></div>
     <p>The device will reboot and connect to the network.</p>
+    <p>MQTT broker connection will be established shortly.</p>
     <p><small>This window will close automatically...</small></p>
   </div>
 </body>

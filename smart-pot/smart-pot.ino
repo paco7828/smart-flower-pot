@@ -7,11 +7,11 @@
 #include <esp_wifi.h>
 #include "html.h"
 
-// MQTT broker info
-const char* MQTT_SERVER_IP = "192.168.31.31";
-const int MQTT_SERVER_PORT = 1883;
-const char* MQTT_USERNAME = "okos-cserep";
-const char* MQTT_PASSWORD = "okoscserep123";
+// Default MQTT broker info (will be overridden by saved config)
+String mqttServerIP = "192.168.31.31";
+int mqttServerPort = 1883;
+String mqttUsername = "okos-cserep";
+String mqttPassword = "okoscserep123";
 
 // NTP server
 const char* ntpServerURL = "pool.ntp.org";
@@ -51,10 +51,10 @@ const char* AP_SSID = "Smart-flower-pot";
 
 // Connection state management
 enum WiFiState {
-  WIFI_AP_ONLY,        // AP mode only (first 3 minutes)
-  WIFI_AP_AND_STA,     // AP + trying to connect to saved WiFi
-  WIFI_CONNECTED,      // Connected to WiFi (AP may still be running)
-  WIFI_FAILED          // WiFi connection failed, running on AP only
+  WIFI_AP_ONLY,     // AP mode only (first 3 minutes)
+  WIFI_AP_AND_STA,  // AP + trying to connect to saved WiFi
+  WIFI_CONNECTED,   // Connected to WiFi (AP may still be running)
+  WIFI_FAILED       // WiFi connection failed, running on AP only
 };
 
 // AP & Wifi variables
@@ -93,6 +93,43 @@ bool loadWiFiCredentials() {
   return (savedSSID != "" && savedPassword != "");
 }
 
+// Function to load MQTT configuration from flash
+bool loadMQTTConfig() {
+  preferences.begin("mqtt", true);
+  mqttServerIP = preferences.getString("server", "192.168.31.31");
+  mqttServerPort = preferences.getInt("port", 1883);
+  mqttUsername = preferences.getString("user", "okos-cserep");
+  mqttPassword = preferences.getString("pass", "okoscserep123");
+  preferences.end();
+
+  return (mqttServerIP != "");
+}
+
+// Function to save configuration to flash
+void saveConfiguration(String ssid, String wifiPass, String mqttServer, int mqttPort, String mqttUser, String mqttPass) {
+  // Save WiFi credentials
+  preferences.begin("wifi", false);
+  preferences.putString("ssid", ssid);
+  preferences.putString("pass", wifiPass);
+  preferences.end();
+
+  // Save MQTT configuration
+  preferences.begin("mqtt", false);
+  preferences.putString("server", mqttServer);
+  preferences.putInt("port", mqttPort);
+  preferences.putString("user", mqttUser);
+  preferences.putString("pass", mqttPass);
+  preferences.end();
+
+  // Update current variables
+  savedSSID = ssid;
+  savedPassword = wifiPass;
+  mqttServerIP = mqttServer;
+  mqttServerPort = mqttPort;
+  mqttUsername = mqttUser;
+  mqttPassword = mqttPass;
+}
+
 // Function to start Access Point - ALWAYS CALLED ON STARTUP
 void startAccessPoint() {
   // Set to AP+STA mode so we can have both AP and try WiFi connection
@@ -115,7 +152,7 @@ void stopAccessPoint() {
     server.end();
     WiFi.softAPdisconnect(true);
     apModeActive = false;
-    
+
     // Switch to STA mode only if we have WiFi connection
     if (WiFi.status() == WL_CONNECTED) {
       WiFi.mode(WIFI_STA);
@@ -128,14 +165,14 @@ void attemptWiFiConnection() {
   if (savedSSID == "" || savedPassword == "") {
     return;
   }
-  
+
   // If AP is still active, use AP+STA mode, otherwise use STA mode
   if (apModeActive) {
     WiFi.mode(WIFI_AP_STA);
   } else {
     WiFi.mode(WIFI_STA);
   }
-  
+
   WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
 
   // Wait up to 20 seconds for connection
@@ -143,7 +180,7 @@ void attemptWiFiConnection() {
   while (WiFi.status() != WL_CONNECTED && attempts < 40) {
     delay(500);
     attempts++;
-    
+
     // Continue processing AP requests during connection attempt
     if (apModeActive) {
       dnsServer.processNextRequest();
@@ -153,8 +190,8 @@ void attemptWiFiConnection() {
   if (WiFi.status() == WL_CONNECTED) {
     currentWiFiState = WIFI_CONNECTED;
 
-    // Initialize MQTT and sensors
-    client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
+    // Initialize MQTT with saved configuration
+    client.setServer(mqttServerIP.c_str(), mqttServerPort);
     configTime(3600, 3600, ntpServerURL);
     getLocalTime(&localTime);
     initializeSensors();
@@ -183,26 +220,28 @@ void setupWebServer() {
     request->send(response);
   });
 
-  server.on("/login", HTTP_POST, [](AsyncWebServerRequest* request) {
-    String ssid, password;
-    if (request->hasParam("username", true)) ssid = request->getParam("username", true)->value();
-    if (request->hasParam("password", true)) password = request->getParam("password", true)->value();
+  server.on("/config", HTTP_POST, [](AsyncWebServerRequest* request) {
+    String wifiSSID, wifiPassword, mqttServer, mqttUser, mqttPass;
+    int mqttPort = 1883;
+
+    // Get WiFi parameters
+    if (request->hasParam("wifi_ssid", true)) wifiSSID = request->getParam("wifi_ssid", true)->value();
+    if (request->hasParam("wifi_password", true)) wifiPassword = request->getParam("wifi_password", true)->value();
+
+    // Get MQTT parameters
+    if (request->hasParam("mqtt_server", true)) mqttServer = request->getParam("mqtt_server", true)->value();
+    if (request->hasParam("mqtt_port", true)) mqttPort = request->getParam("mqtt_port", true)->value().toInt();
+    if (request->hasParam("mqtt_username", true)) mqttUser = request->getParam("mqtt_username", true)->value();
+    if (request->hasParam("mqtt_password", true)) mqttPass = request->getParam("mqtt_password", true)->value();
 
     // Validate inputs
-    if (ssid.length() == 0 || password.length() == 0) {
-      request->send(400, "text/plain", "Invalid credentials");
+    if (wifiSSID.length() == 0 || wifiPassword.length() == 0 || mqttServer.length() == 0 || mqttUser.length() == 0 || mqttPass.length() == 0 || mqttPort < 1 || mqttPort > 65535) {
+      request->send(400, "text/plain", "Invalid configuration parameters");
       return;
     }
 
-    // Save credentials to flash memory
-    preferences.begin("wifi", false);
-    preferences.putString("ssid", ssid);
-    preferences.putString("pass", password);
-    preferences.end();
-
-    // Update saved credentials
-    savedSSID = ssid;
-    savedPassword = password;
+    // Save all configuration
+    saveConfiguration(wifiSSID, wifiPassword, mqttServer, mqttPort, mqttUser, mqttPass);
     credentialsSaved = true;
 
     // Send success response
@@ -212,7 +251,7 @@ void setupWebServer() {
   });
 
   // Handle CORS for AJAX requests
-  server.on("/login", HTTP_OPTIONS, [](AsyncWebServerRequest* request) {
+  server.on("/config", HTTP_OPTIONS, [](AsyncWebServerRequest* request) {
     AsyncWebServerResponse* response = request->beginResponse(200);
     response->addHeader("Access-Control-Allow-Origin", "*");
     response->addHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -230,13 +269,20 @@ void setupWebServer() {
 // Function to connect to MQTT in home assistant
 void reconnect() {
   while (!client.connected() && WiFi.status() == WL_CONNECTED) {
-    client.connect("smart_flower_pot", MQTT_USERNAME, MQTT_PASSWORD)
+    if (client.connect("smart_flower_pot", mqttUsername.c_str(), mqttPassword.c_str())) {
+      // Successfully connected
+      break;
+    } else {
+      // Connection failed, wait before retry
+      delay(5000);
+    }
   }
 }
 
 void setup() {
-  // Load existing credentials
+  // Load existing credentials and MQTT config
   bool hasCredentials = loadWiFiCredentials();
+  loadMQTTConfig();  // Load MQTT configuration
 
   // ALWAYS start AP mode first on every power-up
   startAccessPoint();
@@ -255,7 +301,7 @@ void loop() {
   // ALWAYS process DNS requests while AP is active
   if (apModeActive) {
     dnsServer.processNextRequest();
-    
+
     // Check if AP timeout reached (3 minutes)
     if (currentMillis - apStartTime >= AP_TIMEOUT) {
       stopAccessPoint();
@@ -266,7 +312,7 @@ void loop() {
   switch (currentWiFiState) {
     case WIFI_AP_ONLY:
       // Only AP mode active, waiting for credentials or timeout
-      
+
       // If credentials were just saved, attempt connection
       if (credentialsSaved) {
         credentialsSaved = false;
@@ -274,7 +320,7 @@ void loop() {
         delay(2000);  // Give time for success page to be served
         attemptWiFiConnection();
       }
-      
+
       // Check if we have saved credentials and should try connecting
       else if (loadWiFiCredentials()) {
         currentWiFiState = WIFI_AP_AND_STA;
@@ -284,12 +330,12 @@ void loop() {
 
     case WIFI_AP_AND_STA:
       // AP is running AND we're trying to connect to WiFi
-      
+
       // If credentials were just saved, attempt new connection
       if (credentialsSaved) {
         credentialsSaved = false;
         delay(2000);  // Give time for success page to be served
-        
+
         // Disconnect from current WiFi and try new credentials
         WiFi.disconnect();
         delay(1000);
@@ -299,7 +345,7 @@ void loop() {
 
     case WIFI_CONNECTED:
       // Connected to WiFi (AP may still be running for the first 3 minutes)
-      
+
       // Check if WiFi connection is still alive
       if (WiFi.status() != WL_CONNECTED) {
         currentWiFiState = WIFI_FAILED;
@@ -311,7 +357,7 @@ void loop() {
       if (credentialsSaved) {
         credentialsSaved = false;
         delay(2000);  // Give time for success page to be served
-        
+
         // Disconnect and try new credentials
         WiFi.disconnect();
         delay(1000);
@@ -332,7 +378,7 @@ void loop() {
 
     case WIFI_FAILED:
       // WiFi connection failed, retry periodically
-      
+
       // Handle new credentials
       if (credentialsSaved) {
         credentialsSaved = false;
@@ -340,7 +386,7 @@ void loop() {
         currentWiFiState = apModeActive ? WIFI_AP_AND_STA : WIFI_FAILED;
         attemptWiFiConnection();
       }
-      
+
       // Retry WiFi connection periodically
       else if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL) {
         currentWiFiState = apModeActive ? WIFI_AP_AND_STA : WIFI_FAILED;
