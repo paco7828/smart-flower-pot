@@ -19,18 +19,19 @@ const char* ntpServerURL = "pool.ntp.org";
 // Pins
 const byte MOISTURE_PIN = 0;
 const byte LDR_PIN = 1;
-const byte WATER_LEVEL_PIN = 2;
+const byte WATER_LEVEL_PIN = 2;  // Now used as digital input for water presence
 const byte WATER_PUMP_PIN = 3;
 const byte DHT_PIN = 4;
 
 // Thresholds
 const int MOISTURE_THRESHOLD = 2000;
 const int SUNLIGHT_THRESHOLD = 3000;
-const int WATER_LEVEL_THRESHOLD = 1700;
+// Removed WATER_LEVEL_THRESHOLD since we're using digital read
 
 // Timing
 const unsigned long WATER_NOTIFICATION_INTERVAL = 86400000UL;  // 24 hours
 const unsigned long WATERING_DURATION = 5000;                  // 5 seconds
+const unsigned long WATERING_INTERVAL = 43200000UL;            // 12 hours (12 * 60 * 60 * 1000)
 const unsigned long LIGHT_SEND_INTERVAL = 60000;               // 1 minute
 const unsigned long DARK_SEND_INTERVAL = 600000UL;             // 10 minutes
 const unsigned long AP_TIMEOUT = 180000UL;                     // 3 minutes for AP mode
@@ -41,7 +42,7 @@ float temperature = 0.0;
 float humidity = 0.0;
 int ldrValue = 0;
 int moisture = 0;
-int waterLevel = 0;
+bool waterPresent = false;  // Changed from int waterLevel to bool waterPresent
 
 // Captive portal
 const IPAddress localIP(4, 3, 2, 1);
@@ -69,9 +70,11 @@ String savedPassword = "";
 // Helper variables
 unsigned long lastWaterNotificationTime = 0;
 unsigned long wateringStartTime = 0;
-unsigned long lastMQTTSendTime = -60000;
+unsigned long lastWateringTime = 0;  // NEW: Track when last watering occurred
+unsigned long lastMQTTSendTime = 0;  // Fixed: Initialize to 0 instead of -60000
 bool waterNotifSent = false;
 bool isWatering = false;
+bool justWokeUp = false;  // NEW: Track if we just woke up from sleep
 
 // Instances
 WiFiClient espClient;
@@ -103,6 +106,19 @@ bool loadMQTTConfig() {
   preferences.end();
 
   return (mqttServerIP != "");
+}
+
+// NEW: Function to load/save last watering time from/to flash
+void loadLastWateringTime() {
+  preferences.begin("watering", true);
+  lastWateringTime = preferences.getULong("lastTime", 0);
+  preferences.end();
+}
+
+void saveLastWateringTime() {
+  preferences.begin("watering", false);
+  preferences.putULong("lastTime", lastWateringTime);
+  preferences.end();
 }
 
 // Function to save configuration to flash
@@ -206,7 +222,7 @@ void attemptWiFiConnection() {
 void initializeSensors() {
   pinMode(LDR_PIN, INPUT);
   pinMode(MOISTURE_PIN, INPUT);
-  pinMode(WATER_LEVEL_PIN, INPUT);
+  pinMode(WATER_LEVEL_PIN, INPUT);  // Digital input for water presence detection
   pinMode(WATER_PUMP_PIN, OUTPUT);
   digitalWrite(WATER_PUMP_PIN, LOW);
   dht.begin();
@@ -283,6 +299,7 @@ void setup() {
   // Load existing credentials and MQTT config
   bool hasCredentials = loadWiFiCredentials();
   loadMQTTConfig();  // Load MQTT configuration
+  loadLastWateringTime();  // NEW: Load last watering time
 
   // ALWAYS start AP mode first on every power-up
   startAccessPoint();
@@ -407,14 +424,18 @@ void handleSensorOperations(unsigned long currentMillis) {
   bool isDark = ldrValue <= SUNLIGHT_THRESHOLD;
   unsigned long sendInterval = isDark ? DARK_SEND_INTERVAL : LIGHT_SEND_INTERVAL;
 
-  if (currentMillis - lastMQTTSendTime >= sendInterval) {
+  // Force immediate send on wake up from sleep, or after normal interval
+  bool shouldSend = justWokeUp || (currentMillis - lastMQTTSendTime >= sendInterval);
+  
+  if (shouldSend) {
+    justWokeUp = false;  // Reset wake up flag
     lastMQTTSendTime = currentMillis;
 
     // Read sensors
     temperature = dht.readTemperature();
     humidity = dht.readHumidity();
     moisture = analogRead(MOISTURE_PIN);
-    waterLevel = analogRead(WATER_LEVEL_PIN);
+    waterPresent = digitalRead(WATER_LEVEL_PIN);  // Digital read for water presence
 
     // Publish to MQTT
     char dataBuffer[10];
@@ -422,7 +443,7 @@ void handleSensorOperations(unsigned long currentMillis) {
     client.publish("okoscserep/temperature", dataBuffer);
     dtostrf(humidity, 1, 2, dataBuffer);
     client.publish("okoscserep/humidity", dataBuffer);
-    sprintf(dataBuffer, "%d", waterLevel);
+    sprintf(dataBuffer, "%d", waterPresent ? 1 : 0);  // Publish 1 if water present, 0 if not
     client.publish("okoscserep/water_level", dataBuffer);
     sprintf(dataBuffer, "%d", moisture);
     client.publish("okoscserep/soil_moisture", dataBuffer);
@@ -432,11 +453,19 @@ void handleSensorOperations(unsigned long currentMillis) {
     // Handle automated tasks
     handleAutomation(currentMillis);
 
-    // If dark and not watering => go to sleep
+    // If dark and not watering => go to sleep (FIXED SLEEP LOGIC)
     if (isDark && !isWatering) {
-      delay(200);                                                // Allow MQTT to flush
-      esp_sleep_enable_timer_wakeup(DARK_SEND_INTERVAL * 1000);  // ms to µs
+      delay(200);  // Allow MQTT to flush
+      
+      // FIXED: Proper microsecond conversion for sleep timer
+      uint64_t sleepTimeUs = (uint64_t)DARK_SEND_INTERVAL * 1000ULL;  // Convert ms to µs
+      esp_sleep_enable_timer_wakeup(sleepTimeUs);
+      
+      justWokeUp = true;  // Set flag for when we wake up
       esp_light_sleep_start();
+      
+      // When we wake up, we continue from here
+      // The justWokeUp flag will ensure immediate sensor reading on next loop
     }
   }
 }
@@ -451,8 +480,8 @@ void checkWateringStatus() {
 
 // Function to handle automated tasks
 void handleAutomation(unsigned long currentMillis) {
-  // If water level is below the threshold
-  if (waterLevel <= WATER_LEVEL_THRESHOLD) {
+  // If water is not present (LOW signal from sensor)
+  if (!waterPresent) {
     // Check if time has passed since the last notification
     if (!waterNotifSent || currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
       // Send notification in home assistant once
@@ -462,19 +491,28 @@ void handleAutomation(unsigned long currentMillis) {
     }
   }
 
-  // If moisture is higher than or equal to the threshold and watering isn't happening
-  if (moisture >= MOISTURE_THRESHOLD && !isWatering) {
+  // Only water the plant if:
+  // 1. Moisture is higher than threshold (soil is dry)
+  // 2. Water is present in the reservoir
+  // 3. Not currently watering
+  // 4. NEW: At least 12 hours have passed since last watering
+  if (moisture >= MOISTURE_THRESHOLD && waterPresent && !isWatering && 
+      (currentMillis - lastWateringTime >= WATERING_INTERVAL)) {
     waterPlant();
   }
 
-  // Reset notification flag if interval has passed and water level is still low
-  if (currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
+  // Reset notification flag if interval has passed and water is present again
+  if (waterPresent && waterNotifSent) {
     waterNotifSent = false;
   }
 }
 
 // Plant watering function
 void waterPlant() {
+  // Update last watering time
+  lastWateringTime = millis();
+  saveLastWateringTime();  // NEW: Save to flash memory
+
   // If time is obtained
   if (getLocalTime(&localTime)) {
     char timeBuffer[9];
