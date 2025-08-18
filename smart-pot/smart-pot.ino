@@ -1,10 +1,11 @@
 #include "config.h"
-#include "wifi-handler.h"
 #include <DHT.h>
+#include "wifi-handler.h"
+#include <esp_sleep.h>
 
 // Instances
-#define DHTTYPE DHT22
-DHT dht(DHT_PIN, DHTTYPE);
+#define DHT_TYPE DHT22
+DHT dht(DHT_PIN, DHT_TYPE);
 WifiHandler wifiHandler;
 
 void setup() {
@@ -45,8 +46,8 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  // Process DNS requests only during initial setup
-  if (wifiHandler.isApModeActive() && wifiHandler.isInitialSetup()) {
+  // Handle web server requests
+  if (wifiHandler.isApModeActive()) {
     wifiHandler.dnsServer.processNextRequest();
   }
 
@@ -231,9 +232,10 @@ void waterPlant() {
   wifiHandler.saveLastWateringTime();
 
   // Publish watering time to MQTT
-  if (getLocalTime(&wifiHandler.localTime)) {
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
     char timeBuffer[9];
-    sprintf(timeBuffer, "%02d:%02d:%02d", wifiHandler.localTime.tm_hour, wifiHandler.localTime.tm_min, wifiHandler.localTime.tm_sec);
+    sprintf(timeBuffer, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     wifiHandler.sendLastWateringTime(timeBuffer);
   }
 

@@ -9,7 +9,7 @@ const byte MOISTURE_PIN = 0;
 const byte LDR_PIN = 1;
 const byte WATER_LEVEL_PIN = 2;
 const byte WATER_PUMP_PIN = 3;
-const byte DHT_PIN = 4;
+const int DHT_PIN = 4;
 
 // Timing variables
 const unsigned long WATER_NOTIFICATION_INTERVAL = 86400000UL;  // 24 hours
@@ -38,7 +38,7 @@ String MQTT_USERNAME = "okos-cserep";
 String MQTT_PASSWORD = "okoscserep123";
 
 // NTP server
-const char *NTP_SERVER_URL = "pool.ntp.org";
+const char* NTP_SERVER_URL = "pool.ntp.org";
 
 // --------------------------------------------------------------------------
 // ------------------------- VARIABLES --------------------------------------
