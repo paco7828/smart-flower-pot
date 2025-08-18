@@ -153,7 +153,7 @@ public:
 
     void sendSunlightPresence(char buffer[10])
     {
-        client.publish("okoscserep/sunlight", buffer);
+        client.publish("okoscserep/sunlight_presence", buffer);
     }
 
     void sendLastWateringTime(char buffer[9])
