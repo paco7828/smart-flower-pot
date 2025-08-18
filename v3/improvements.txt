@@ -13,7 +13,7 @@ Components:
          - Install step up converter (3.7V battery to 9V for the pump)
          - Converter circuit is only activated when watering should happen (ESP32 GPIO switches circuit)
 
-     - 
+     - Add buzzer, for "transmitter" & "receiver", both will beep every 30 minutes when water container is running low
 
 PCB:
      - Change 1k resistors' size from 0805 to 0402
