@@ -19,19 +19,19 @@ const char* ntpServerURL = "pool.ntp.org";
 // Pins
 const byte MOISTURE_PIN = 0;
 const byte LDR_PIN = 1;
-const byte WATER_LEVEL_PIN = 2;  // Now used as digital input for water presence
+const byte WATER_LEVEL_PIN = 2;
 const byte WATER_PUMP_PIN = 3;
 const byte DHT_PIN = 4;
 
 // Thresholds
 const int MOISTURE_THRESHOLD = 2000;
 const int SUNLIGHT_THRESHOLD = 3000;
-// Removed WATER_LEVEL_THRESHOLD since we're using digital read
+const int WATER_LEVEL_THRESHOLD = 1000;
 
-// Timing
+// Timing variables
 const unsigned long WATER_NOTIFICATION_INTERVAL = 86400000UL;  // 24 hours
 const unsigned long WATERING_DURATION = 5000;                  // 5 seconds
-const unsigned long WATERING_INTERVAL = 43200000UL;            // 12 hours (12 * 60 * 60 * 1000)
+const unsigned long WATERING_INTERVAL = 1800000UL;             // 30 minutes (30 * 60 * 1000)
 const unsigned long LIGHT_SEND_INTERVAL = 60000;               // 1 minute
 const unsigned long DARK_SEND_INTERVAL = 600000UL;             // 10 minutes
 const unsigned long AP_TIMEOUT = 180000UL;                     // 3 minutes for AP mode
@@ -42,7 +42,7 @@ float temperature = 0.0;
 float humidity = 0.0;
 int ldrValue = 0;
 int moisture = 0;
-bool waterPresent = false;  // Changed from int waterLevel to bool waterPresent
+bool waterPresent = false;
 
 // Captive portal
 const IPAddress localIP(4, 3, 2, 1);
@@ -52,29 +52,30 @@ const char* AP_SSID = "Smart-flower-pot";
 
 // Connection state management
 enum WiFiState {
-  WIFI_AP_ONLY,     // AP mode only (first 3 minutes)
-  WIFI_AP_AND_STA,  // AP + trying to connect to saved WiFi
-  WIFI_CONNECTED,   // Connected to WiFi (AP may still be running)
-  WIFI_FAILED       // WiFi connection failed, running on AP only
+  WIFI_SETUP_MODE,  // Initial setup with AP
+  WIFI_CONNECTING,  // Trying to connect to WiFi
+  WIFI_CONNECTED,   // Connected to WiFi
+  WIFI_FAILED       // WiFi connection failed
 };
 
 // AP & Wifi variables
-WiFiState currentWiFiState = WIFI_AP_ONLY;
+WiFiState currentWiFiState = WIFI_SETUP_MODE;
 unsigned long apStartTime = 0;
 unsigned long lastWiFiAttempt = 0;
 bool credentialsSaved = false;
 bool apModeActive = false;
+bool isInitialSetup = true;
 String savedSSID = "";
 String savedPassword = "";
 
 // Helper variables
 unsigned long lastWaterNotificationTime = 0;
 unsigned long wateringStartTime = 0;
-unsigned long lastWateringTime = 0;  // NEW: Track when last watering occurred
-unsigned long lastMQTTSendTime = 0;  // Fixed: Initialize to 0 instead of -60000
+unsigned long lastWateringTime = 0;
+unsigned long lastMQTTSendTime = -60000;
 bool waterNotifSent = false;
 bool isWatering = false;
-bool justWokeUp = false;  // NEW: Track if we just woke up from sleep
+bool justWokeUp = false;
 
 // Instances
 WiFiClient espClient;
@@ -108,16 +109,31 @@ bool loadMQTTConfig() {
   return (mqttServerIP != "");
 }
 
-// NEW: Function to load/save last watering time from/to flash
+// Function to load/save last watering time from/to flash
 void loadLastWateringTime() {
   preferences.begin("watering", true);
   lastWateringTime = preferences.getULong("lastTime", 0);
   preferences.end();
 }
 
+// Function to save last watering time into flash
 void saveLastWateringTime() {
   preferences.begin("watering", false);
   preferences.putULong("lastTime", lastWateringTime);
+  preferences.end();
+}
+
+// Function to load/save last water notification time
+void loadLastWaterNotificationTime() {
+  preferences.begin("notification", true);
+  lastWaterNotificationTime = preferences.getULong("lastNotif", 0);
+  preferences.end();
+}
+
+// Function to save last water notif time into flash
+void saveLastWaterNotificationTime() {
+  preferences.begin("notification", false);
+  preferences.putULong("lastNotif", lastWaterNotificationTime);
   preferences.end();
 }
 
@@ -146,10 +162,9 @@ void saveConfiguration(String ssid, String wifiPass, String mqttServer, int mqtt
   mqttPassword = mqttPass;
 }
 
-// Function to start Access Point - ALWAYS CALLED ON STARTUP
+// Function to start Access Point - ONLY during initial setup or when no WiFi credentials
 void startAccessPoint() {
-  // Set to AP+STA mode so we can have both AP and try WiFi connection
-  WiFi.mode(WIFI_AP_STA);
+  WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(localIP, gatewayIP, subnet);
   WiFi.softAP(AP_SSID);
 
@@ -158,37 +173,30 @@ void startAccessPoint() {
 
   apStartTime = millis();
   apModeActive = true;
-  currentWiFiState = WIFI_AP_ONLY;
 }
 
-// Function to stop Access Point after timeout
+// Function to stop Access Point
 void stopAccessPoint() {
   if (apModeActive) {
     dnsServer.stop();
     server.end();
     WiFi.softAPdisconnect(true);
     apModeActive = false;
-
-    // Switch to STA mode only if we have WiFi connection
-    if (WiFi.status() == WL_CONNECTED) {
-      WiFi.mode(WIFI_STA);
-    }
   }
 }
 
 // Function to attempt WiFi connection
-void attemptWiFiConnection() {
+bool attemptWiFiConnection() {
   if (savedSSID == "" || savedPassword == "") {
-    return;
+    return false;
   }
 
-  // If AP is still active, use AP+STA mode, otherwise use STA mode
-  if (apModeActive) {
-    WiFi.mode(WIFI_AP_STA);
-  } else {
-    WiFi.mode(WIFI_STA);
+  // Stop AP during connection attempt to save power
+  if (apModeActive && !isInitialSetup) {
+    stopAccessPoint();
   }
 
+  WiFi.mode(WIFI_STA);
   WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
 
   // Wait up to 20 seconds for connection
@@ -197,32 +205,29 @@ void attemptWiFiConnection() {
     delay(500);
     attempts++;
 
-    // Continue processing AP requests during connection attempt
-    if (apModeActive) {
+    // Continue processing AP requests during initial setup only
+    if (apModeActive && isInitialSetup) {
       dnsServer.processNextRequest();
     }
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    currentWiFiState = WIFI_CONNECTED;
-
     // Initialize MQTT with saved configuration
     client.setServer(mqttServerIP.c_str(), mqttServerPort);
     configTime(3600, 3600, ntpServerURL);
     getLocalTime(&localTime);
     initializeSensors();
-
-  } else {
-    currentWiFiState = WIFI_FAILED;
-    lastWiFiAttempt = millis();
+    return true;
   }
+
+  return false;
 }
 
 // Function to initialize sensors
 void initializeSensors() {
   pinMode(LDR_PIN, INPUT);
   pinMode(MOISTURE_PIN, INPUT);
-  pinMode(WATER_LEVEL_PIN, INPUT);  // Digital input for water presence detection
+  pinMode(WATER_LEVEL_PIN, INPUT);
   pinMode(WATER_PUMP_PIN, OUTPUT);
   digitalWrite(WATER_PUMP_PIN, LOW);
   dht.begin();
@@ -282,87 +287,92 @@ void setupWebServer() {
   server.begin();
 }
 
-// Function to connect to MQTT in home assistant
+// Function to connect to MQTT
 void reconnect() {
-  while (!client.connected() && WiFi.status() == WL_CONNECTED) {
+  int attempts = 0;
+  while (!client.connected() && WiFi.status() == WL_CONNECTED && attempts < 3) {
     if (client.connect("smart_flower_pot", mqttUsername.c_str(), mqttPassword.c_str())) {
-      // Successfully connected
       break;
     } else {
-      // Connection failed, wait before retry
-      delay(5000);
+      delay(2000);
+      attempts++;
     }
   }
 }
 
 void setup() {
-  // Load existing credentials and MQTT config
+  // Load existing credentials and configuration
   bool hasCredentials = loadWiFiCredentials();
-  loadMQTTConfig();  // Load MQTT configuration
-  loadLastWateringTime();  // NEW: Load last watering time
+  loadMQTTConfig();
+  loadLastWateringTime();
+  loadLastWaterNotificationTime();
 
-  // ALWAYS start AP mode first on every power-up
-  startAccessPoint();
+  if (!hasCredentials) {
+    // No credentials saved - start in setup mode
+    startAccessPoint();
+    isInitialSetup = true;
+    currentWiFiState = WIFI_SETUP_MODE;
+  } else {
+    // Credentials exist - try to connect directly
+    isInitialSetup = false;
+    currentWiFiState = WIFI_CONNECTING;
 
-  // If we have credentials, also try to connect to WiFi immediately
-  if (hasCredentials) {
-    delay(2000);  // Give AP time to fully start
-    currentWiFiState = WIFI_AP_AND_STA;
-    attemptWiFiConnection();
+    if (attemptWiFiConnection()) {
+      currentWiFiState = WIFI_CONNECTED;
+    } else {
+      // Connection failed - start AP for reconfiguration
+      currentWiFiState = WIFI_FAILED;
+      startAccessPoint();
+    }
   }
 }
 
 void loop() {
   unsigned long currentMillis = millis();
 
-  // ALWAYS process DNS requests while AP is active
-  if (apModeActive) {
+  // Process DNS requests only during initial setup
+  if (apModeActive && isInitialSetup) {
     dnsServer.processNextRequest();
-
-    // Check if AP timeout reached (3 minutes)
-    if (currentMillis - apStartTime >= AP_TIMEOUT) {
-      stopAccessPoint();
-    }
   }
 
   // Handle different WiFi states
   switch (currentWiFiState) {
-    case WIFI_AP_ONLY:
-      // Only AP mode active, waiting for credentials or timeout
-
-      // If credentials were just saved, attempt connection
+    case WIFI_SETUP_MODE:
+      // Initial setup mode with AP
       if (credentialsSaved) {
         credentialsSaved = false;
-        currentWiFiState = WIFI_AP_AND_STA;
-        delay(2000);  // Give time for success page to be served
-        attemptWiFiConnection();
+        delay(1500);  // Give time for success page to be served
+
+        if (attemptWiFiConnection()) {
+          currentWiFiState = WIFI_CONNECTED;
+          isInitialSetup = false;
+          stopAccessPoint();
+        } else {
+          currentWiFiState = WIFI_FAILED;
+        }
       }
 
-      // Check if we have saved credentials and should try connecting
-      else if (loadWiFiCredentials()) {
-        currentWiFiState = WIFI_AP_AND_STA;
-        attemptWiFiConnection();
+      // Check AP timeout during initial setup
+      if (currentMillis - apStartTime >= AP_TIMEOUT) {
+        // If we have saved credentials but couldn't connect, try without AP
+        if (loadWiFiCredentials()) {
+          stopAccessPoint();
+          isInitialSetup = false;
+          currentWiFiState = WIFI_CONNECTING;
+        }
       }
       break;
 
-    case WIFI_AP_AND_STA:
-      // AP is running AND we're trying to connect to WiFi
-
-      // If credentials were just saved, attempt new connection
-      if (credentialsSaved) {
-        credentialsSaved = false;
-        delay(2000);  // Give time for success page to be served
-
-        // Disconnect from current WiFi and try new credentials
-        WiFi.disconnect();
-        delay(1000);
-        attemptWiFiConnection();
+    case WIFI_CONNECTING:
+      if (attemptWiFiConnection()) {
+        currentWiFiState = WIFI_CONNECTED;
+      } else {
+        currentWiFiState = WIFI_FAILED;
+        lastWiFiAttempt = currentMillis;
       }
       break;
 
     case WIFI_CONNECTED:
-      // Connected to WiFi (AP may still be running for the first 3 minutes)
-
       // Check if WiFi connection is still alive
       if (WiFi.status() != WL_CONNECTED) {
         currentWiFiState = WIFI_FAILED;
@@ -370,16 +380,13 @@ void loop() {
         break;
       }
 
-      // Handle new credentials even when connected
+      // Handle credential updates
       if (credentialsSaved) {
         credentialsSaved = false;
-        delay(2000);  // Give time for success page to be served
-
-        // Disconnect and try new credentials
+        delay(1500);
         WiFi.disconnect();
         delay(1000);
-        currentWiFiState = apModeActive ? WIFI_AP_AND_STA : WIFI_FAILED;
-        attemptWiFiConnection();
+        currentWiFiState = WIFI_CONNECTING;
         break;
       }
 
@@ -389,25 +396,20 @@ void loop() {
       }
       client.loop();
 
-      // Handle normal sensor operations
+      // Handle sensor operations
       handleSensorOperations(currentMillis);
       break;
 
     case WIFI_FAILED:
-      // WiFi connection failed, retry periodically
-
-      // Handle new credentials
+      // Handle credential updates
       if (credentialsSaved) {
         credentialsSaved = false;
-        delay(2000);  // Give time for success page to be served
-        currentWiFiState = apModeActive ? WIFI_AP_AND_STA : WIFI_FAILED;
-        attemptWiFiConnection();
+        delay(1500);
+        currentWiFiState = WIFI_CONNECTING;
       }
-
       // Retry WiFi connection periodically
       else if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL) {
-        currentWiFiState = apModeActive ? WIFI_AP_AND_STA : WIFI_FAILED;
-        attemptWiFiConnection();
+        currentWiFiState = WIFI_CONNECTING;
       }
       break;
   }
@@ -424,48 +426,56 @@ void handleSensorOperations(unsigned long currentMillis) {
   bool isDark = ldrValue <= SUNLIGHT_THRESHOLD;
   unsigned long sendInterval = isDark ? DARK_SEND_INTERVAL : LIGHT_SEND_INTERVAL;
 
-  // Force immediate send on wake up from sleep, or after normal interval
+  // Check if we should send data
   bool shouldSend = justWokeUp || (currentMillis - lastMQTTSendTime >= sendInterval);
-  
+
   if (shouldSend) {
-    justWokeUp = false;  // Reset wake up flag
+    justWokeUp = false;
     lastMQTTSendTime = currentMillis;
 
     // Read sensors
     temperature = dht.readTemperature();
     humidity = dht.readHumidity();
     moisture = analogRead(MOISTURE_PIN);
-    waterPresent = digitalRead(WATER_LEVEL_PIN);  // Digital read for water presence
+    waterPresent = (analogRead(WATER_LEVEL_PIN) >= WATER_LEVEL_THRESHOLD);
 
-    // Publish to MQTT
+    // Buffer for MQTT data
     char dataBuffer[10];
+
+    // Temperature
     dtostrf(temperature, 1, 2, dataBuffer);
     client.publish("okoscserep/temperature", dataBuffer);
+
+    // Humidity
     dtostrf(humidity, 1, 2, dataBuffer);
     client.publish("okoscserep/humidity", dataBuffer);
-    sprintf(dataBuffer, "%d", waterPresent ? 1 : 0);  // Publish 1 if water present, 0 if not
+
+    // Water presence
+    sprintf(dataBuffer, "%d", waterPresent ? 1 : 0);
     client.publish("okoscserep/water_level", dataBuffer);
+
+    // Soil moisture
     sprintf(dataBuffer, "%d", moisture);
     client.publish("okoscserep/soil_moisture", dataBuffer);
-    sprintf(dataBuffer, "%d", isDark);
+
+    // Sunlight presence
+    sprintf(dataBuffer, "%d", isDark ? 0 : 1);
     client.publish("okoscserep/sunlight", dataBuffer);
 
     // Handle automated tasks
     handleAutomation(currentMillis);
 
-    // If dark and not watering => go to sleep (FIXED SLEEP LOGIC)
+    // Go to sleep during dark periods
     if (isDark && !isWatering) {
-      delay(200);  // Allow MQTT to flush
-      
-      // FIXED: Proper microsecond conversion for sleep timer
-      uint64_t sleepTimeUs = (uint64_t)DARK_SEND_INTERVAL * 1000ULL;  // Convert ms to µs
+      delay(500);  // Allow MQTT messages to be sent
+
+      // Properly convert milliseconds to microseconds
+      uint64_t sleepTimeUs = (uint64_t)DARK_SEND_INTERVAL * 1000ULL;
       esp_sleep_enable_timer_wakeup(sleepTimeUs);
-      
-      justWokeUp = true;  // Set flag for when we wake up
+
+      // Use light sleep to maintain WiFi connection
+      justWokeUp = true;
       esp_light_sleep_start();
-      
-      // When we wake up, we continue from here
-      // The justWokeUp flag will ensure immediate sensor reading on next loop
     }
   }
 }
@@ -480,30 +490,22 @@ void checkWateringStatus() {
 
 // Function to handle automated tasks
 void handleAutomation(unsigned long currentMillis) {
-  // If water is not present (LOW signal from sensor)
+  // Water notification logic
   if (!waterPresent) {
-    // Check if time has passed since the last notification
     if (!waterNotifSent || currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
-      // Send notification in home assistant once
       sendNotification();
       lastWaterNotificationTime = currentMillis;
+      saveLastWaterNotificationTime();
       waterNotifSent = true;
     }
-  }
-
-  // Only water the plant if:
-  // 1. Moisture is higher than threshold (soil is dry)
-  // 2. Water is present in the reservoir
-  // 3. Not currently watering
-  // 4. NEW: At least 12 hours have passed since last watering
-  if (moisture >= MOISTURE_THRESHOLD && waterPresent && !isWatering && 
-      (currentMillis - lastWateringTime >= WATERING_INTERVAL)) {
-    waterPlant();
-  }
-
-  // Reset notification flag if interval has passed and water is present again
-  if (waterPresent && waterNotifSent) {
+  } else {
+    // Reset notification flag when water is present
     waterNotifSent = false;
+  }
+
+  // Plant watering logic
+  if (moisture >= MOISTURE_THRESHOLD && waterPresent && !isWatering && (currentMillis - lastWateringTime >= WATERING_INTERVAL)) {
+    waterPlant();
   }
 }
 
@@ -511,18 +513,16 @@ void handleAutomation(unsigned long currentMillis) {
 void waterPlant() {
   // Update last watering time
   lastWateringTime = millis();
-  saveLastWateringTime();  // NEW: Save to flash memory
+  saveLastWateringTime();
 
-  // If time is obtained
+  // Publish watering time to MQTT
   if (getLocalTime(&localTime)) {
     char timeBuffer[9];
-    // Format time
     sprintf(timeBuffer, "%02d:%02d:%02d", localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
-    // Publish to MQTT
     client.publish("okoscserep/last_watering_time", timeBuffer);
   }
 
-  // Actual watering
+  // Start watering
   isWatering = true;
   digitalWrite(WATER_PUMP_PIN, HIGH);
   wateringStartTime = millis();
@@ -530,7 +530,6 @@ void waterPlant() {
 
 // Notification sending
 void sendNotification() {
-  // Turn on for 1 second
   client.publish("smart_flower_pot/notify", "ON");
   delay(1000);
   client.publish("smart_flower_pot/notify", "OFF");
