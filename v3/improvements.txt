@@ -1,3 +1,13 @@
+Split functionality:
+     - 1 portable "transmitter":
+         - PCB includes soil moisture and all other sensors
+     - 1 "receiver":
+         - Uses ESP-NOW for communication with the transmitter, water pump + water level container connected
+
+    - Summary:
+         - transmitter sends the data wirelessly, powered via battery + charged via solar panel
+         - receiver handles watering and processes data into home assistant via MQTT, powered via cable, has a TFT screen to show the received data
+
 Components:
      - Stronger water pump -> R385:
          - Install step up converter (3.7V battery to 9V for the pump)
