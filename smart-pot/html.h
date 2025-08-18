@@ -1,3 +1,5 @@
+#pragma once
+
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
@@ -245,7 +247,7 @@ const char success_html[] PROGMEM = R"rawliteral(
       } else {
         document.body.innerHTML = '<div class="message"><h2>Success!</h2><p>You can now close this window/tab.</p><p>The device is connecting to your WiFi network and MQTT broker.</p></div>';
       }
-    }, 5000);
+    }, 3000);
   </script>
 </head>
 <body>

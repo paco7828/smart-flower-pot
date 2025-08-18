@@ -1,259 +1,43 @@
 #include "config.h"
-#include <WiFi.h>
-#include <PubSubClient.h>
+#include "wifi-handler.h"
 #include <DHT.h>
-#include <Preferences.h>
-#include <DNSServer.h>
-#include <ESPAsyncWebServer.h>
-#include <esp_wifi.h>
-#include "html.h"
 
 // Instances
-WiFiClient espClient;
-PubSubClient client(espClient);
 #define DHTTYPE DHT22
 DHT dht(DHT_PIN, DHTTYPE);
-struct tm localTime;
-Preferences preferences;
-DNSServer dnsServer;
-AsyncWebServer server(80);
+WifiHandler wifiHandler;
 
-// Function to load WiFi credentials from flash
-bool loadWiFiCredentials() {
-  preferences.begin("wifi", true);
-  savedSSID = preferences.getString("ssid", "");
-  savedPassword = preferences.getString("pass", "");
-  preferences.end();
-
-  return (savedSSID != "" && savedPassword != "");
-}
-
-// Function to load MQTT configuration from flash
-bool loadMQTTConfig() {
-  preferences.begin("mqtt", true);
-  MQTT_SERVER_IP = preferences.getString("server", "192.168.31.31");
-  MQTT_SERVER_PORT = preferences.getInt("port", 1883);
-  MQTT_USERNAME = preferences.getString("user", "okos-cserep");
-  MQTT_PASSWORD = preferences.getString("pass", "okoscserep123");
-  preferences.end();
-
-  return (MQTT_SERVER_IP != "");
-}
-
-// Function to load/save last watering time from/to flash
-void loadLastWateringTime() {
-  preferences.begin("watering", true);
-  lastWateringTime = preferences.getULong("lastTime", 0);
-  preferences.end();
-}
-
-// Function to save last watering time into flash
-void saveLastWateringTime() {
-  preferences.begin("watering", false);
-  preferences.putULong("lastTime", lastWateringTime);
-  preferences.end();
-}
-
-// Function to load/save last water notification time
-void loadLastWaterNotificationTime() {
-  preferences.begin("notification", true);
-  lastWaterNotificationTime = preferences.getULong("lastNotif", 0);
-  preferences.end();
-}
-
-// Function to save last water notif time into flash
-void saveLastWaterNotificationTime() {
-  preferences.begin("notification", false);
-  preferences.putULong("lastNotif", lastWaterNotificationTime);
-  preferences.end();
-}
-
-// Function to save configuration to flash
-void saveConfiguration(String ssid, String wifiPass, String mqttServer, int mqttPort, String mqttUser, String mqttPass) {
-  // Save WiFi credentials
-  preferences.begin("wifi", false);
-  preferences.putString("ssid", ssid);
-  preferences.putString("pass", wifiPass);
-  preferences.end();
-
-  // Save MQTT configuration
-  preferences.begin("mqtt", false);
-  preferences.putString("server", mqttServer);
-  preferences.putInt("port", mqttPort);
-  preferences.putString("user", mqttUser);
-  preferences.putString("pass", mqttPass);
-  preferences.end();
-
-  // Update current variables
-  savedSSID = ssid;
-  savedPassword = wifiPass;
-  MQTT_SERVER_IP = mqttServer;
-  MQTT_SERVER_PORT = mqttPort;
-  MQTT_USERNAME = mqttUser;
-  MQTT_PASSWORD = mqttPass;
-}
-
-// Function to start Access Point - ONLY during initial setup or when no WiFi credentials
-void startAccessPoint() {
-  WiFi.mode(WIFI_AP);
-  WiFi.softAPConfig(localIP, gatewayIP, subnet);
-  WiFi.softAP(AP_SSID);
-
-  dnsServer.start(53, "*", localIP);
-  setupWebServer();
-
-  apStartTime = millis();
-  apModeActive = true;
-}
-
-// Function to stop Access Point
-void stopAccessPoint() {
-  if (apModeActive) {
-    dnsServer.stop();
-    server.end();
-    WiFi.softAPdisconnect(true);
-    apModeActive = false;
-  }
-}
-
-// Function to attempt WiFi connection
-bool attemptWiFiConnection() {
-  if (savedSSID == "" || savedPassword == "") {
-    return false;
-  }
-
-  // Stop AP during connection attempt to save power
-  if (apModeActive && !isInitialSetup) {
-    stopAccessPoint();
-  }
-
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
-
-  // Wait up to 20 seconds for connection
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-    delay(500);
-    attempts++;
-
-    // Continue processing AP requests during initial setup only
-    if (apModeActive && isInitialSetup) {
-      dnsServer.processNextRequest();
-    }
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    // Initialize MQTT with saved configuration
-    client.setServer(MQTT_SERVER_IP.c_str(), MQTT_SERVER_PORT);
-    configTime(3600, 3600, NTP_SERVER_URL);
-    getLocalTime(&localTime);
-    initializeSensors();
-    return true;
-  }
-
-  return false;
-}
-
-// Function to initialize sensors
-void initializeSensors() {
+void setup() {
+  // Initialize sensors
   pinMode(LDR_PIN, INPUT);
   pinMode(MOISTURE_PIN, INPUT);
   pinMode(WATER_LEVEL_PIN, INPUT);
   pinMode(WATER_PUMP_PIN, OUTPUT);
   digitalWrite(WATER_PUMP_PIN, LOW);
   dht.begin();
-}
 
-// Function to setup web server for captive portal
-void setupWebServer() {
-  server.on("/", HTTP_ANY, [](AsyncWebServerRequest* request) {
-    AsyncWebServerResponse* response = request->beginResponse(200, "text/html", index_html);
-    response->addHeader("Cache-Control", "no-cache");
-    request->send(response);
-  });
-
-  server.on("/config", HTTP_POST, [](AsyncWebServerRequest* request) {
-    String wifiSSID, wifiPassword, mqttServer, mqttUser, mqttPass;
-    int mqttPort = 1883;
-
-    // Get WiFi parameters
-    if (request->hasParam("wifi_ssid", true)) wifiSSID = request->getParam("wifi_ssid", true)->value();
-    if (request->hasParam("wifi_password", true)) wifiPassword = request->getParam("wifi_password", true)->value();
-
-    // Get MQTT parameters
-    if (request->hasParam("mqtt_server", true)) mqttServer = request->getParam("mqtt_server", true)->value();
-    if (request->hasParam("mqtt_port", true)) mqttPort = request->getParam("mqtt_port", true)->value().toInt();
-    if (request->hasParam("mqtt_username", true)) mqttUser = request->getParam("mqtt_username", true)->value();
-    if (request->hasParam("mqtt_password", true)) mqttPass = request->getParam("mqtt_password", true)->value();
-
-    // Validate inputs
-    if (wifiSSID.length() == 0 || wifiPassword.length() == 0 || mqttServer.length() == 0 || mqttUser.length() == 0 || mqttPass.length() == 0 || mqttPort < 1 || mqttPort > 65535) {
-      request->send(400, "text/plain", "Invalid configuration parameters");
-      return;
-    }
-
-    // Save all configuration
-    saveConfiguration(wifiSSID, wifiPassword, mqttServer, mqttPort, mqttUser, mqttPass);
-    credentialsSaved = true;
-
-    // Send success response
-    AsyncWebServerResponse* response = request->beginResponse(200, "text/html", success_html);
-    response->addHeader("Cache-Control", "no-cache");
-    request->send(response);
-  });
-
-  // Handle CORS for AJAX requests
-  server.on("/config", HTTP_OPTIONS, [](AsyncWebServerRequest* request) {
-    AsyncWebServerResponse* response = request->beginResponse(200);
-    response->addHeader("Access-Control-Allow-Origin", "*");
-    response->addHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    response->addHeader("Access-Control-Allow-Headers", "Content-Type");
-    request->send(response);
-  });
-
-  server.onNotFound([](AsyncWebServerRequest* request) {
-    request->redirect("http://4.3.2.1");
-  });
-
-  server.begin();
-}
-
-// Function to connect to MQTT
-void reconnect() {
-  int attempts = 0;
-  while (!client.connected() && WiFi.status() == WL_CONNECTED && attempts < 3) {
-    if (client.connect("smart_flower_pot", MQTT_USERNAME.c_str(), MQTT_PASSWORD.c_str())) {
-      break;
-    } else {
-      delay(2000);
-      attempts++;
-    }
-  }
-}
-
-void setup() {
   // Load existing credentials and configuration
-  bool hasCredentials = loadWiFiCredentials();
-  loadMQTTConfig();
-  loadLastWateringTime();
-  loadLastWaterNotificationTime();
+  bool hasCredentials = wifiHandler.loadWiFiCredentials();
+  wifiHandler.loadMQTTConfig();
+  wifiHandler.loadLastWateringTime();
+  wifiHandler.loadLastWaterNotificationTime();
 
   if (!hasCredentials) {
     // No credentials saved - start in setup mode
-    startAccessPoint();
-    isInitialSetup = true;
+    wifiHandler.startAccessPoint();
+    wifiHandler.setInitialSetup(true);
     currentWiFiState = WIFI_SETUP_MODE;
   } else {
     // Credentials exist - try to connect directly
-    isInitialSetup = false;
+    wifiHandler.setInitialSetup(false);
     currentWiFiState = WIFI_CONNECTING;
 
-    if (attemptWiFiConnection()) {
+    if (wifiHandler.attemptWiFiConnection()) {
       currentWiFiState = WIFI_CONNECTED;
     } else {
       // Connection failed - start AP for reconfiguration
       currentWiFiState = WIFI_FAILED;
-      startAccessPoint();
+      wifiHandler.startAccessPoint();
     }
   }
 }
@@ -262,40 +46,40 @@ void loop() {
   unsigned long currentMillis = millis();
 
   // Process DNS requests only during initial setup
-  if (apModeActive && isInitialSetup) {
-    dnsServer.processNextRequest();
+  if (wifiHandler.isApModeActive() && wifiHandler.isInitialSetup()) {
+    wifiHandler.dnsServer.processNextRequest();
   }
 
   // Handle different WiFi states
   switch (currentWiFiState) {
     case WIFI_SETUP_MODE:
       // Initial setup mode with AP
-      if (credentialsSaved) {
-        credentialsSaved = false;
+      if (wifiHandler.areCredentialsSaved()) {
+        wifiHandler.setCredentialsSaved(false);
         delay(1500);  // Give time for success page to be served
 
-        if (attemptWiFiConnection()) {
+        if (wifiHandler.attemptWiFiConnection()) {
           currentWiFiState = WIFI_CONNECTED;
-          isInitialSetup = false;
-          stopAccessPoint();
+          wifiHandler.setInitialSetup(false);
+          wifiHandler.stopAccessPoint();
         } else {
           currentWiFiState = WIFI_FAILED;
         }
       }
 
       // Check AP timeout during initial setup
-      if (currentMillis - apStartTime >= AP_TIMEOUT) {
+      if (currentMillis - wifiHandler.getApStartTime() >= AP_TIMEOUT) {
         // If we have saved credentials but couldn't connect, try without AP
-        if (loadWiFiCredentials()) {
-          stopAccessPoint();
-          isInitialSetup = false;
+        if (wifiHandler.loadWiFiCredentials()) {
+          wifiHandler.stopAccessPoint();
+          wifiHandler.setInitialSetup(false);
           currentWiFiState = WIFI_CONNECTING;
         }
       }
       break;
 
     case WIFI_CONNECTING:
-      if (attemptWiFiConnection()) {
+      if (wifiHandler.attemptWiFiConnection()) {
         currentWiFiState = WIFI_CONNECTED;
       } else {
         currentWiFiState = WIFI_FAILED;
@@ -312,8 +96,8 @@ void loop() {
       }
 
       // Handle credential updates
-      if (credentialsSaved) {
-        credentialsSaved = false;
+      if (wifiHandler.areCredentialsSaved()) {
+        wifiHandler.setCredentialsSaved(false);
         delay(1500);
         WiFi.disconnect();
         delay(1000);
@@ -322,10 +106,10 @@ void loop() {
       }
 
       // Reconnect MQTT if needed
-      if (!client.connected()) {
-        reconnect();
+      if (!wifiHandler.client.connected()) {
+        wifiHandler.reconnect();
       }
-      client.loop();
+      wifiHandler.client.loop();
 
       // Handle sensor operations
       handleSensorOperations(currentMillis);
@@ -333,8 +117,8 @@ void loop() {
 
     case WIFI_FAILED:
       // Handle credential updates
-      if (credentialsSaved) {
-        credentialsSaved = false;
+      if (wifiHandler.areCredentialsSaved()) {
+        wifiHandler.setCredentialsSaved(false);
         delay(1500);
         currentWiFiState = WIFI_CONNECTING;
       }
@@ -375,23 +159,23 @@ void handleSensorOperations(unsigned long currentMillis) {
 
     // Temperature
     dtostrf(temperature, 1, 2, dataBuffer);
-    client.publish("okoscserep/temperature", dataBuffer);
+    wifiHandler.sendTemperature(dataBuffer);
 
     // Humidity
     dtostrf(humidity, 1, 2, dataBuffer);
-    client.publish("okoscserep/humidity", dataBuffer);
+    wifiHandler.sendHumidity(dataBuffer);
 
     // Water presence
     sprintf(dataBuffer, "%d", waterPresent ? 1 : 0);
-    client.publish("okoscserep/water_level", dataBuffer);
+    wifiHandler.sendWaterPresence(dataBuffer);
 
     // Soil moisture
     sprintf(dataBuffer, "%d", moisture);
-    client.publish("okoscserep/soil_moisture", dataBuffer);
+    wifiHandler.sendMoisture(dataBuffer);
 
     // Sunlight presence
     sprintf(dataBuffer, "%d", isDark ? 0 : 1);
-    client.publish("okoscserep/sunlight", dataBuffer);
+    wifiHandler.sendSunlightPresence(dataBuffer);
 
     // Handle automated tasks
     handleAutomation(currentMillis);
@@ -423,10 +207,10 @@ void checkWateringStatus() {
 void handleAutomation(unsigned long currentMillis) {
   // Water notification logic
   if (!waterPresent) {
-    if (!waterNotifSent || currentMillis - lastWaterNotificationTime >= WATER_NOTIFICATION_INTERVAL) {
-      sendNotification();
-      lastWaterNotificationTime = currentMillis;
-      saveLastWaterNotificationTime();
+    if (!waterNotifSent || currentMillis - wifiHandler.getLastWaterNotificationTime() >= WATER_NOTIFICATION_INTERVAL) {
+      wifiHandler.sendNotification();
+      wifiHandler.setLastWaterNotificationTime(currentMillis);
+      wifiHandler.saveLastWaterNotificationTime();
       waterNotifSent = true;
     }
   } else {
@@ -435,7 +219,7 @@ void handleAutomation(unsigned long currentMillis) {
   }
 
   // Plant watering logic
-  if (moisture >= MOISTURE_THRESHOLD && waterPresent && !isWatering && (currentMillis - lastWateringTime >= WATERING_INTERVAL)) {
+  if (moisture >= MOISTURE_THRESHOLD && waterPresent && !isWatering && (currentMillis - wifiHandler.getLastWateringTime() >= WATERING_INTERVAL)) {
     waterPlant();
   }
 }
@@ -443,25 +227,18 @@ void handleAutomation(unsigned long currentMillis) {
 // Plant watering function
 void waterPlant() {
   // Update last watering time
-  lastWateringTime = millis();
-  saveLastWateringTime();
+  wifiHandler.setLastWateringTime(millis());
+  wifiHandler.saveLastWateringTime();
 
   // Publish watering time to MQTT
-  if (getLocalTime(&localTime)) {
+  if (getLocalTime(&wifiHandler.localTime)) {
     char timeBuffer[9];
-    sprintf(timeBuffer, "%02d:%02d:%02d", localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
-    client.publish("okoscserep/last_watering_time", timeBuffer);
+    sprintf(timeBuffer, "%02d:%02d:%02d", wifiHandler.localTime.tm_hour, wifiHandler.localTime.tm_min, wifiHandler.localTime.tm_sec);
+    wifiHandler.sendLastWateringTime(timeBuffer);
   }
 
   // Start watering
   isWatering = true;
   digitalWrite(WATER_PUMP_PIN, HIGH);
   wateringStartTime = millis();
-}
-
-// Notification sending
-void sendNotification() {
-  client.publish("smart_flower_pot/notify", "ON");
-  delay(1000);
-  client.publish("smart_flower_pot/notify", "OFF");
 }

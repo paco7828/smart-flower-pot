@@ -1,3 +1,5 @@
+#pragma once
+
 // --------------------------------------------------------------------------
 // ------------------------- CONSTANTS --------------------------------------
 // --------------------------------------------------------------------------
@@ -59,18 +61,10 @@ enum WiFiState {
 
 // AP & Wifi variables
 WiFiState currentWiFiState = WIFI_SETUP_MODE;
-unsigned long apStartTime = 0;
 unsigned long lastWiFiAttempt = 0;
-bool credentialsSaved = false;
-bool apModeActive = false;
-bool isInitialSetup = true;
-String savedSSID = "";
-String savedPassword = "";
 
 // Helper variables
-unsigned long lastWaterNotificationTime = 0;
 unsigned long wateringStartTime = 0;
-unsigned long lastWateringTime = 0;
 unsigned long lastMQTTSendTime = -60000;
 bool waterNotifSent = false;
 bool isWatering = false;
