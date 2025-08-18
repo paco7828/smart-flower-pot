@@ -1,3 +1,4 @@
+#include "config.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <DHT.h>
@@ -6,76 +7,6 @@
 #include <ESPAsyncWebServer.h>
 #include <esp_wifi.h>
 #include "html.h"
-
-// Default MQTT broker info (will be overridden by saved config)
-String mqttServerIP = "192.168.31.31";
-int mqttServerPort = 1883;
-String mqttUsername = "okos-cserep";
-String mqttPassword = "okoscserep123";
-
-// NTP server
-const char* ntpServerURL = "pool.ntp.org";
-
-// Pins
-const byte MOISTURE_PIN = 0;
-const byte LDR_PIN = 1;
-const byte WATER_LEVEL_PIN = 2;
-const byte WATER_PUMP_PIN = 3;
-const byte DHT_PIN = 4;
-
-// Thresholds
-const int MOISTURE_THRESHOLD = 2000;
-const int SUNLIGHT_THRESHOLD = 3000;
-const int WATER_LEVEL_THRESHOLD = 1000;
-
-// Timing variables
-const unsigned long WATER_NOTIFICATION_INTERVAL = 86400000UL;  // 24 hours
-const unsigned long WATERING_DURATION = 5000;                  // 5 seconds
-const unsigned long WATERING_INTERVAL = 1800000UL;             // 30 minutes (30 * 60 * 1000)
-const unsigned long LIGHT_SEND_INTERVAL = 60000;               // 1 minute
-const unsigned long DARK_SEND_INTERVAL = 600000UL;             // 10 minutes
-const unsigned long AP_TIMEOUT = 180000UL;                     // 3 minutes for AP mode
-const unsigned long WIFI_RETRY_INTERVAL = 30000;               // 30 seconds between WiFi connection attempts
-
-// Default values
-float temperature = 0.0;
-float humidity = 0.0;
-int ldrValue = 0;
-int moisture = 0;
-bool waterPresent = false;
-
-// Captive portal
-const IPAddress localIP(4, 3, 2, 1);
-const IPAddress gatewayIP(4, 3, 2, 1);
-const IPAddress subnet(255, 255, 255, 0);
-const char* AP_SSID = "Smart-flower-pot";
-
-// Connection state management
-enum WiFiState {
-  WIFI_SETUP_MODE,  // Initial setup with AP
-  WIFI_CONNECTING,  // Trying to connect to WiFi
-  WIFI_CONNECTED,   // Connected to WiFi
-  WIFI_FAILED       // WiFi connection failed
-};
-
-// AP & Wifi variables
-WiFiState currentWiFiState = WIFI_SETUP_MODE;
-unsigned long apStartTime = 0;
-unsigned long lastWiFiAttempt = 0;
-bool credentialsSaved = false;
-bool apModeActive = false;
-bool isInitialSetup = true;
-String savedSSID = "";
-String savedPassword = "";
-
-// Helper variables
-unsigned long lastWaterNotificationTime = 0;
-unsigned long wateringStartTime = 0;
-unsigned long lastWateringTime = 0;
-unsigned long lastMQTTSendTime = -60000;
-bool waterNotifSent = false;
-bool isWatering = false;
-bool justWokeUp = false;
 
 // Instances
 WiFiClient espClient;
@@ -100,13 +31,13 @@ bool loadWiFiCredentials() {
 // Function to load MQTT configuration from flash
 bool loadMQTTConfig() {
   preferences.begin("mqtt", true);
-  mqttServerIP = preferences.getString("server", "192.168.31.31");
-  mqttServerPort = preferences.getInt("port", 1883);
-  mqttUsername = preferences.getString("user", "okos-cserep");
-  mqttPassword = preferences.getString("pass", "okoscserep123");
+  MQTT_SERVER_IP = preferences.getString("server", "192.168.31.31");
+  MQTT_SERVER_PORT = preferences.getInt("port", 1883);
+  MQTT_USERNAME = preferences.getString("user", "okos-cserep");
+  MQTT_PASSWORD = preferences.getString("pass", "okoscserep123");
   preferences.end();
 
-  return (mqttServerIP != "");
+  return (MQTT_SERVER_IP != "");
 }
 
 // Function to load/save last watering time from/to flash
@@ -156,10 +87,10 @@ void saveConfiguration(String ssid, String wifiPass, String mqttServer, int mqtt
   // Update current variables
   savedSSID = ssid;
   savedPassword = wifiPass;
-  mqttServerIP = mqttServer;
-  mqttServerPort = mqttPort;
-  mqttUsername = mqttUser;
-  mqttPassword = mqttPass;
+  MQTT_SERVER_IP = mqttServer;
+  MQTT_SERVER_PORT = mqttPort;
+  MQTT_USERNAME = mqttUser;
+  MQTT_PASSWORD = mqttPass;
 }
 
 // Function to start Access Point - ONLY during initial setup or when no WiFi credentials
@@ -213,8 +144,8 @@ bool attemptWiFiConnection() {
 
   if (WiFi.status() == WL_CONNECTED) {
     // Initialize MQTT with saved configuration
-    client.setServer(mqttServerIP.c_str(), mqttServerPort);
-    configTime(3600, 3600, ntpServerURL);
+    client.setServer(MQTT_SERVER_IP.c_str(), MQTT_SERVER_PORT);
+    configTime(3600, 3600, NTP_SERVER_URL);
     getLocalTime(&localTime);
     initializeSensors();
     return true;
@@ -291,7 +222,7 @@ void setupWebServer() {
 void reconnect() {
   int attempts = 0;
   while (!client.connected() && WiFi.status() == WL_CONNECTED && attempts < 3) {
-    if (client.connect("smart_flower_pot", mqttUsername.c_str(), mqttPassword.c_str())) {
+    if (client.connect("smart_flower_pot", MQTT_USERNAME.c_str(), MQTT_PASSWORD.c_str())) {
       break;
     } else {
       delay(2000);
