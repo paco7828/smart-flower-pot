@@ -8,23 +8,45 @@
 DHT dht(DHT_PIN, DHT_TYPE);
 WifiHandler wifiHandler;
 
+bool isDark = false;
+unsigned long lastDataSendTime = 0;
+
 void setup() {
   // Initialize sensors
   pinMode(LDR_PIN, INPUT);
   pinMode(MOISTURE_PIN, INPUT);
-  pinMode(WATER_LEVEL_PIN, INPUT);
   pinMode(WATER_PUMP_PIN, OUTPUT);
   digitalWrite(WATER_PUMP_PIN, LOW);
   dht.begin();
 
+  // Initialize RTC data on first boot
+  if (!rtcData.isInitialized) {
+    rtcData.isInitialized = true;
+    rtcData.bootCount = 0;
+    rtcData.lastWateringTime = 0;
+    rtcData.totalSleepTime = 0;
+  }
+  rtcData.bootCount++;
+
+  // Add sleep time to total (except for first boot)
+  if (rtcData.bootCount > 1) {
+    rtcData.totalSleepTime += (DARK_SEND_INTERVAL / 1000);  // Convert to milliseconds
+  }
+
+  // Record wake up time
+  wakeupTime = millis();
+  tasksCompleted = false;
+  justWokeUp = true;
+
   // Load existing credentials and configuration
   bool hasCredentials = wifiHandler.loadWiFiCredentials();
   wifiHandler.loadMQTTConfig();
-  wifiHandler.loadLastWateringTime();
-  wifiHandler.loadLastWaterNotificationTime();
+
+  // Load timing data from RTC or preferences
+  loadTimingData();
 
   if (!hasCredentials) {
-    // No credentials saved - start in setup mode
+    // No credentials saved - start in setup mode (stay awake)
     wifiHandler.startAccessPoint();
     wifiHandler.setInitialSetup(true);
     currentWiFiState = WIFI_SETUP_MODE;
@@ -36,7 +58,7 @@ void setup() {
     if (wifiHandler.attemptWiFiConnection()) {
       currentWiFiState = WIFI_CONNECTED;
     } else {
-      // Connection failed - start AP for reconfiguration
+      // Connection failed - start AP for reconfiguration (stay awake)
       currentWiFiState = WIFI_FAILED;
       wifiHandler.startAccessPoint();
     }
@@ -54,7 +76,7 @@ void loop() {
   // Handle different WiFi states
   switch (currentWiFiState) {
     case WIFI_SETUP_MODE:
-      // Initial setup mode with AP
+      // Initial setup mode with AP - stay awake until configured
       if (wifiHandler.areCredentialsSaved()) {
         wifiHandler.setCredentialsSaved(false);
         delay(1500);  // Give time for success page to be served
@@ -112,7 +134,7 @@ void loop() {
       }
       wifiHandler.client.loop();
 
-      // Handle sensor operations
+      // Handle sensor operations and check for sleep
       handleSensorOperations(currentMillis);
       break;
 
@@ -127,7 +149,31 @@ void loop() {
       else if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL) {
         currentWiFiState = WIFI_CONNECTING;
       }
+      // If we can't connect and have been awake too long, go to sleep (only if dark)
+      else if (currentMillis - wakeupTime >= AWAKE_TIME_MS && !wifiHandler.isApModeActive()) {
+        // Read light sensor to determine if we should sleep
+        ldrValue = analogRead(LDR_PIN);
+        isDark = ldrValue <= SUNLIGHT_THRESHOLD;
+        if (isDark) {
+          goToDeepSleep();
+        }
+      }
       break;
+  }
+
+  // Check if we should go to deep sleep (only when dark, not in AP mode, and tasks completed)
+  if (!wifiHandler.isApModeActive() && tasksCompleted && (currentMillis - wakeupTime >= AWAKE_TIME_MS)) {
+    // Read light sensor to determine if we should sleep
+    ldrValue = analogRead(LDR_PIN);
+    isDark = ldrValue <= SUNLIGHT_THRESHOLD;
+
+    if (isDark) {
+      goToDeepSleep();
+    } else {
+      // It's sunny - reset task completion to continue operation
+      tasksCompleted = false;
+      justWokeUp = false;  // Reset this to allow periodic data sending
+    }
   }
 
   delay(100);
@@ -137,38 +183,42 @@ void loop() {
 void handleSensorOperations(unsigned long currentMillis) {
   checkWateringStatus();
 
-  // Determine sending interval based on sunlight detection
+  // Read light sensor to determine current light condition
   ldrValue = analogRead(LDR_PIN);
-  bool isDark = ldrValue <= SUNLIGHT_THRESHOLD;
-  unsigned long sendInterval = isDark ? DARK_SEND_INTERVAL : LIGHT_SEND_INTERVAL;
+  isDark = ldrValue <= SUNLIGHT_THRESHOLD;
 
-  // Check if we should send data
-  bool shouldSend = justWokeUp || (currentMillis - lastMQTTSendTime >= sendInterval);
+  // Send data when we wake up OR every minute when sunny OR every 10 minutes when dark
+  bool shouldSendData = false;
 
-  if (shouldSend) {
+  if (justWokeUp) {
+    shouldSendData = true;
     justWokeUp = false;
-    lastMQTTSendTime = currentMillis;
+  } else if (!isDark && (currentMillis - lastDataSendTime >= LIGHT_SEND_INTERVAL)) {
+    shouldSendData = true;
+  }
 
-    // Read sensors
+  if (shouldSendData) {
+    lastDataSendTime = currentMillis;
+
+    // Read all sensors
     temperature = dht.readTemperature();
     humidity = dht.readHumidity();
     moisture = analogRead(MOISTURE_PIN);
-    waterPresent = (analogRead(WATER_LEVEL_PIN) >= WATER_LEVEL_THRESHOLD);
 
     // Buffer for MQTT data
     char dataBuffer[10];
 
     // Temperature
-    dtostrf(temperature, 1, 2, dataBuffer);
-    wifiHandler.sendTemperature(dataBuffer);
+    if (!isnan(temperature)) {
+      dtostrf(temperature, 1, 2, dataBuffer);
+      wifiHandler.sendTemperature(dataBuffer);
+    }
 
     // Humidity
-    dtostrf(humidity, 1, 2, dataBuffer);
-    wifiHandler.sendHumidity(dataBuffer);
-
-    // Water presence
-    sprintf(dataBuffer, "%d", waterPresent ? 1 : 0);
-    wifiHandler.sendWaterPresence(dataBuffer);
+    if (!isnan(humidity)) {
+      dtostrf(humidity, 1, 2, dataBuffer);
+      wifiHandler.sendHumidity(dataBuffer);
+    }
 
     // Soil moisture
     sprintf(dataBuffer, "%d", moisture);
@@ -178,21 +228,16 @@ void handleSensorOperations(unsigned long currentMillis) {
     sprintf(dataBuffer, "%d", isDark ? 0 : 1);
     wifiHandler.sendSunlightPresence(dataBuffer);
 
-    // Handle automated tasks
-    handleAutomation(currentMillis);
+    // Allow some time for MQTT messages to be sent
+    delay(1000);
+  }
 
-    // Go to sleep during dark periods
-    if (isDark && !isWatering) {
-      delay(500);  // Allow MQTT messages to be sent
+  // Handle automated tasks
+  handleAutomation(currentMillis);
 
-      // Properly convert milliseconds to microseconds
-      uint64_t sleepTimeUs = (uint64_t)DARK_SEND_INTERVAL * 1000ULL;
-      esp_sleep_enable_timer_wakeup(sleepTimeUs);
-
-      // Use light sleep to maintain WiFi connection
-      justWokeUp = true;
-      esp_light_sleep_start();
-    }
+  // Mark tasks as completed only if it's dark (for sleep decision)
+  if (isDark) {
+    tasksCompleted = true;
   }
 }
 
@@ -204,32 +249,22 @@ void checkWateringStatus() {
   }
 }
 
-// Function to handle automated tasks
+// FIXED: Improved automation function with proper timing calculations
 void handleAutomation(unsigned long currentMillis) {
-  // Water notification logic
-  if (!waterPresent) {
-    if (!waterNotifSent || currentMillis - wifiHandler.getLastWaterNotificationTime() >= WATER_NOTIFICATION_INTERVAL) {
-      wifiHandler.sendNotification();
-      wifiHandler.setLastWaterNotificationTime(currentMillis);
-      wifiHandler.saveLastWaterNotificationTime();
-      waterNotifSent = true;
-    }
-  } else {
-    // Reset notification flag when water is present
-    waterNotifSent = false;
-  }
+  // Calculate total uptime (current session + all previous sleep time)
+  unsigned long totalUptime = rtcData.totalSleepTime + currentMillis;
 
-  // Plant watering logic
-  if (moisture >= MOISTURE_THRESHOLD && waterPresent && !isWatering && (currentMillis - wifiHandler.getLastWateringTime() >= WATERING_INTERVAL)) {
-    waterPlant();
+  // Plant watering logic - FIXED: Use total uptime for accurate timing
+  if (moisture >= MOISTURE_THRESHOLD && !isWatering && (totalUptime - rtcData.lastWateringTime >= WATERING_INTERVAL)) {
+    waterPlant(totalUptime);
   }
 }
 
-// Plant watering function
-void waterPlant() {
+// FIXED: Plant watering function with corrected timing
+void waterPlant(unsigned long totalUptime) {
   // Update last watering time
-  wifiHandler.setLastWateringTime(millis());
-  wifiHandler.saveLastWateringTime();
+  rtcData.lastWateringTime = totalUptime;
+  saveTimingData();
 
   // Publish watering time to MQTT
   struct tm timeinfo;
@@ -243,4 +278,41 @@ void waterPlant() {
   isWatering = true;
   digitalWrite(WATER_PUMP_PIN, HIGH);
   wateringStartTime = millis();
+
+  // Don't go to sleep while watering, regardless of light condition
+  tasksCompleted = false;
+}
+
+// Function to go to deep sleep (only called when it's dark)
+void goToDeepSleep() {
+  // Save current state to preferences as backup
+  saveTimingData();
+
+  // Configure wake up timer - now 10 minutes
+  esp_sleep_enable_timer_wakeup(DARK_SEND_INTERVAL);
+
+  // Disconnect WiFi to save power
+  WiFi.disconnect();
+  WiFi.mode(WIFI_OFF);
+
+  // Go to deep sleep
+  esp_deep_sleep_start();
+}
+
+// Function to load timing data from RTC memory or preferences
+void loadTimingData() {
+  // If RTC data seems invalid, load from preferences as backup
+  if (rtcData.lastWateringTime == 0) {
+    wifiHandler.loadLastWateringTime();
+    rtcData.lastWateringTime = wifiHandler.getLastWateringTime();
+  }
+
+  // Update wifiHandler with RTC data
+  wifiHandler.setLastWateringTime(rtcData.lastWateringTime);
+}
+
+// Function to save timing data to preferences
+void saveTimingData() {
+  wifiHandler.setLastWateringTime(rtcData.lastWateringTime);
+  wifiHandler.saveLastWateringTime();
 }

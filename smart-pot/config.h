@@ -7,23 +7,23 @@
 // Pins
 const byte MOISTURE_PIN = 0;
 const byte LDR_PIN = 1;
-const byte WATER_LEVEL_PIN = 2;
 const byte WATER_PUMP_PIN = 3;
 const int DHT_PIN = 4;
 
 // Timing variables
-const unsigned long WATER_NOTIFICATION_INTERVAL = 86400000UL;  // 24 hours
-const unsigned long WATERING_DURATION = 5000;                  // 5 seconds
-const unsigned long WATERING_INTERVAL = 1800000UL;             // 30 minutes (30 * 60 * 1000)
-const unsigned long LIGHT_SEND_INTERVAL = 60000;               // 1 minute
-const unsigned long DARK_SEND_INTERVAL = 600000UL;             // 10 minutes
-const unsigned long AP_TIMEOUT = 180000UL;                     // 3 minutes for AP mode
-const unsigned long WIFI_RETRY_INTERVAL = 30000;               // 30 seconds between WiFi connection attempts
+const unsigned long WATERING_DURATION = 5000;            // 5 seconds
+const unsigned long WATERING_INTERVAL = 1800000UL;       // 30 minutes (30 * 60 * 1000)
+const unsigned long LIGHT_SEND_INTERVAL = 60000;         // 1 minute
+const unsigned long DARK_SEND_INTERVAL = 1800000000ULL;  // 30 minutes in microseconds (30 * 60 * 1000 * 1000)
+const unsigned long AP_TIMEOUT = 180000UL;               // 3 minutes for AP mode
+const unsigned long WIFI_RETRY_INTERVAL = 30000;         // 30 seconds between WiFi connection attempts
+
+// Deep sleep timing - FIXED: Changed from 1 minute to 10 minutes
+const unsigned long AWAKE_TIME_MS = 10000;  // 10 seconds awake time
 
 // Thresholds
 const int MOISTURE_THRESHOLD = 2000;
-const int SUNLIGHT_THRESHOLD = 3000;
-const int WATER_LEVEL_THRESHOLD = 1000;
+const int SUNLIGHT_THRESHOLD = 2000;
 
 // Captive portal
 const IPAddress localIP(4, 3, 2, 1);
@@ -49,7 +49,6 @@ float temperature = 0.0;
 float humidity = 0.0;
 int ldrValue = 0;
 int moisture = 0;
-bool waterPresent = false;
 
 // Connection state management
 enum WiFiState {
@@ -66,6 +65,18 @@ unsigned long lastWiFiAttempt = 0;
 // Helper variables
 unsigned long wateringStartTime = 0;
 unsigned long lastMQTTSendTime = -60000;
-bool waterNotifSent = false;
 bool isWatering = false;
 bool justWokeUp = false;
+
+// Deep sleep and wake management
+unsigned long wakeupTime = 0;
+bool tasksCompleted = false;
+
+// RTC memory structure to persist data across deep sleep
+RTC_DATA_ATTR struct {
+  bool isInitialized = false;
+  unsigned long lastWateringTime = 0;
+  uint32_t bootCount = 0;
+  // ADDED: Track total sleep time to maintain accurate timing
+  unsigned long totalSleepTime = 0;
+} rtcData;
