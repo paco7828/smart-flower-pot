@@ -45,10 +45,6 @@ public:
     return this->credentialsSaved;
   }
 
-  bool isInitialSetup() {
-    return this->initialSetup;
-  }
-
   unsigned long getLastWateringTime() {
     return this->lastWateringTime;
   }

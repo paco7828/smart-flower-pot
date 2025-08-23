@@ -8,9 +8,6 @@
 DHT dht(DHT_PIN, DHT_TYPE);
 WifiHandler wifiHandler;
 
-bool isDark = false;
-unsigned long lastDataSendTime = 0;
-
 void setup() {
   // Initialize sensors
   pinMode(LDR_PIN, INPUT);
@@ -102,6 +99,7 @@ void loop() {
       break;
 
     case WIFI_CONNECTING:
+      // Attempt to connect to WiFi
       if (wifiHandler.attemptWiFiConnection()) {
         currentWiFiState = WIFI_CONNECTED;
       } else {
@@ -172,7 +170,7 @@ void loop() {
     } else {
       // It's sunny - reset task completion to continue operation
       tasksCompleted = false;
-      justWokeUp = false;  // Reset this to allow periodic data sending
+      justWokeUp = false;  // Reset to allow periodic data sending
     }
   }
 
@@ -249,18 +247,18 @@ void checkWateringStatus() {
   }
 }
 
-// FIXED: Improved automation function with proper timing calculations
+// Automation function with proper timing calculations
 void handleAutomation(unsigned long currentMillis) {
   // Calculate total uptime (current session + all previous sleep time)
   unsigned long totalUptime = rtcData.totalSleepTime + currentMillis;
 
-  // Plant watering logic - FIXED: Use total uptime for accurate timing
+  // Plant watering logic - use total uptime for accurate timing
   if (moisture >= MOISTURE_THRESHOLD && !isWatering && (totalUptime - rtcData.lastWateringTime >= WATERING_INTERVAL)) {
     waterPlant(totalUptime);
   }
 }
 
-// FIXED: Plant watering function with corrected timing
+// Plant watering function
 void waterPlant(unsigned long totalUptime) {
   // Update last watering time
   rtcData.lastWateringTime = totalUptime;
@@ -283,7 +281,7 @@ void waterPlant(unsigned long totalUptime) {
   tasksCompleted = false;
 }
 
-// Function to go to deep sleep (only called when it's dark)
+// Function to go to deep sleep
 void goToDeepSleep() {
   // Save current state to preferences as backup
   saveTimingData();

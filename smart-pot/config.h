@@ -23,7 +23,7 @@ const unsigned long AWAKE_TIME_MS = 10000;  // 10 seconds awake time
 
 // Thresholds
 const int MOISTURE_THRESHOLD = 2000;
-const int SUNLIGHT_THRESHOLD = 2000;
+const int SUNLIGHT_THRESHOLD = 1500;
 
 // Captive portal
 const IPAddress localIP(4, 3, 2, 1);
@@ -64,9 +64,10 @@ unsigned long lastWiFiAttempt = 0;
 
 // Helper variables
 unsigned long wateringStartTime = 0;
-unsigned long lastMQTTSendTime = -60000;
 bool isWatering = false;
 bool justWokeUp = false;
+bool isDark = false;
+unsigned long lastDataSendTime = 0;
 
 // Deep sleep and wake management
 unsigned long wakeupTime = 0;
