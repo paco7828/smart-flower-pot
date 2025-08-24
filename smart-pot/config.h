@@ -22,7 +22,7 @@ const unsigned long WIFI_RETRY_INTERVAL = 30000;         // 30 seconds between W
 const unsigned long AWAKE_TIME_MS = 10000;  // 10 seconds awake time
 
 // Thresholds
-const int MOISTURE_THRESHOLD = 2000;
+const int MOISTURE_THRESHOLD = 2400;
 const int SUNLIGHT_THRESHOLD = 1500;
 
 // Captive portal
