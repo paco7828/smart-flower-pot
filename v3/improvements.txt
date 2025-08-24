@@ -9,7 +9,7 @@ Optional:
 PCB:
      - Change 1k resistors' size from 0805 to 0402
      - Change step up converter circuit to MT3608
-     - Change leds' size from 0805 to 0402
+     - Change leds' size from SMD 0805 to THT 2.54 
      - Change SS14 schottky diodes to ->  1N5819HW-7-F
      - Change LDR to TEMT6000 (with 10k resistor)
      - Change 10k resistor's size from 0805 to 0402
