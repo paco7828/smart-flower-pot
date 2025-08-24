@@ -1,29 +1,19 @@
-Split functionality:
-     - 1 portable "transmitter":
-         - PCB includes soil moisture and all other sensors
-     - 1 "receiver":
-         - Uses ESP-NOW for communication with the transmitter, water pump + water level container connected
+Functionality:
+    -Portable & hand sized
+    -Remove water level sensor due to unnecessarity
+    -Add buzzer -> beeps when watering needed (soil moisture low)
 
-    - Summary:
-         - transmitter sends the data wirelessly, powered via battery + charged via solar panel
-         - receiver handles watering and processes data into home assistant via MQTT, powered via cable, has a TFT screen to show the received data
-
-Components:
-     - Stronger water pump -> R385:
-         - Install step up converter (3.7V battery to 9V for the pump)
-         - Converter circuit is only activated when watering should happen (ESP32 GPIO switches circuit)
-
-     - Add buzzer, for "transmitter" & "receiver", both will beep every 30 minutes when water container is running low
+Optional:
+    -capacitive water presence sensor -> TTP223 + single insulated wire (wire in water -> water present)
 
 PCB:
      - Change 1k resistors' size from 0805 to 0402
-     - Change inductor with bigger value - https://www.hestore.hu/prod_10038580.html
+     - Change step up converter circuit to MT3608
      - Change leds' size from 0805 to 0402
-     - Change SS14 schottky diodes to ->  https://www.hestore.hu/prod_10046229.html
+     - Change SS14 schottky diodes to ->  1N5819HW-7-F
      - Change LDR to TEMT6000 (with 10k resistor)
      - Change 10k resistor's size from 0805 to 0402
      - Change DHT22 to -> DS18B20+
-     - Change JST connectors:
-         - B2B-XH-A -> B2B-ZR + 
-         - B3B-XH-A -> B3B-ZR + 
-        
+     - Change JST connector:
+         - B2B-XH-A -> B2B-ZR + JT-A1250H-2P-300 
+     - Soil moisture sensor goes directly on board
