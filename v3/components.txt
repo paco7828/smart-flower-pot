@@ -1,0 +1,24 @@
+1x USB-C 6 pin - https://www.hestore.hu/prod_10046971.html
+3x B2B-ZR - https://www.hestore.hu/prod_10047454.html
+3x JT-A1250H-2P-300 - https://www.hestore.hu/prod_10047749.html
+2x 47uF 0805 capacitor - https://www.hestore.hu/prod_10042066.html
+3x 1N5819HW-7-F - https://www.hestore.hu/prod_10046229.html
+2x 10uF 0805 capacitor - https://www.hestore.hu/prod_10032047.html
+1x 1.2kR 0805 resistor - https://www.hestore.hu/prod_10001268.html
+1x TP4056 - https://www.hestore.hu/prod_10037291.html
+1x 8205A - https://www.hestore.hu/prod_10045032.html
+1x DW01A - https://www.hestore.hu/prod_10046612.html
+4x 1kR 0402 resistor - https://www.hestore.hu/prod_10030528.html
+1x Red led THT 2.54mm - https://www.hestore.hu/prod_10036527.html
+1x Green led THT 2.54mm - https://www.hestore.hu/prod_10036530.html
+1x Soil moisture sensor - https://www.hestore.hu/prod_10045867.html
+1x DS18B20+ - https://www.hestore.hu/prod_10028985.html
+1x ESP32 C3 SUPERMINI - https://www.hestore.hu/prod_10048018.html
+1x MT3608 - https://www.hestore.hu/prod_10048950.html
+1x 22uH 0705 inductor - https://www.hestore.hu/prod_10046500.html
+1x 7.5kR 0805 resistor - https://www.hestore.hu/prod_10001197.html
+1x TEMT6000 - https://www.hestore.hu/prod_10041857.html
+1x 10kR 0402 resistor - https://www.hestore.hu/prod_10029294.html
+1x NPN SOT23 transistor - https://www.hestore.hu/prod_10020924.html
+1x SD8223LC - https://www.hestore.hu/prod_10040207.html
+1x 22pF 0805 capacitor - https://www.hestore.hu/prod_10001131.html
