@@ -8,7 +8,8 @@
 DHT dht(DHT_PIN, DHT_TYPE);
 WifiHandler wifiHandler;
 
-void setup() {
+void setup()
+{
   // Initialize sensors
   pinMode(LDR_PIN, INPUT);
   pinMode(MOISTURE_PIN, INPUT);
@@ -17,17 +18,18 @@ void setup() {
   dht.begin();
 
   // Initialize RTC data on first boot
-  if (!rtcData.isInitialized) {
+  if (!rtcData.isInitialized)
+  {
     rtcData.isInitialized = true;
     rtcData.bootCount = 0;
-    rtcData.lastWateringTime = 0;
     rtcData.totalSleepTime = 0;
   }
   rtcData.bootCount++;
 
   // Add sleep time to total (except for first boot)
-  if (rtcData.bootCount > 1) {
-    rtcData.totalSleepTime += (DARK_SEND_INTERVAL / 1000);  // Convert to milliseconds
+  if (rtcData.bootCount > 1)
+  {
+    rtcData.totalSleepTime += (DARK_SEND_INTERVAL / 1000); // Convert to milliseconds
   }
 
   // Record wake up time
@@ -39,22 +41,25 @@ void setup() {
   bool hasCredentials = wifiHandler.loadWiFiCredentials();
   wifiHandler.loadMQTTConfig();
 
-  // Load timing data from RTC or preferences
-  loadTimingData();
-
-  if (!hasCredentials) {
+  if (!hasCredentials)
+  {
     // No credentials saved - start in setup mode (stay awake)
     wifiHandler.startAccessPoint();
     wifiHandler.setInitialSetup(true);
     currentWiFiState = WIFI_SETUP_MODE;
-  } else {
+  }
+  else
+  {
     // Credentials exist - try to connect directly
     wifiHandler.setInitialSetup(false);
     currentWiFiState = WIFI_CONNECTING;
 
-    if (wifiHandler.attemptWiFiConnection()) {
+    if (wifiHandler.attemptWiFiConnection())
+    {
       currentWiFiState = WIFI_CONNECTED;
-    } else {
+    }
+    else
+    {
       // Connection failed - start AP for reconfiguration (stay awake)
       currentWiFiState = WIFI_FAILED;
       wifiHandler.startAccessPoint();
@@ -62,115 +67,138 @@ void setup() {
   }
 }
 
-void loop() {
+void loop()
+{
   unsigned long currentMillis = millis();
 
   // Handle web server requests
-  if (wifiHandler.isApModeActive()) {
+  if (wifiHandler.isApModeActive())
+  {
     wifiHandler.dnsServer.processNextRequest();
   }
 
   // Handle different WiFi states
-  switch (currentWiFiState) {
-    case WIFI_SETUP_MODE:
-      // Initial setup mode with AP - stay awake until configured
-      if (wifiHandler.areCredentialsSaved()) {
-        wifiHandler.setCredentialsSaved(false);
-        delay(1500);  // Give time for success page to be served
+  switch (currentWiFiState)
+  {
+  case WIFI_SETUP_MODE:
+    // Initial setup mode with AP - stay awake until configured
+    if (wifiHandler.areCredentialsSaved())
+    {
+      wifiHandler.setCredentialsSaved(false);
+      delay(1500); // Give time for success page to be served
 
-        if (wifiHandler.attemptWiFiConnection()) {
-          currentWiFiState = WIFI_CONNECTED;
-          wifiHandler.setInitialSetup(false);
-          wifiHandler.stopAccessPoint();
-        } else {
-          currentWiFiState = WIFI_FAILED;
-        }
-      }
-
-      // Check AP timeout during initial setup
-      if (currentMillis - wifiHandler.getApStartTime() >= AP_TIMEOUT) {
-        // If we have saved credentials but couldn't connect, try without AP
-        if (wifiHandler.loadWiFiCredentials()) {
-          wifiHandler.stopAccessPoint();
-          wifiHandler.setInitialSetup(false);
-          currentWiFiState = WIFI_CONNECTING;
-        }
-      }
-      break;
-
-    case WIFI_CONNECTING:
-      // Attempt to connect to WiFi
-      if (wifiHandler.attemptWiFiConnection()) {
+      if (wifiHandler.attemptWiFiConnection())
+      {
         currentWiFiState = WIFI_CONNECTED;
-      } else {
+        wifiHandler.setInitialSetup(false);
+        wifiHandler.stopAccessPoint();
+      }
+      else
+      {
         currentWiFiState = WIFI_FAILED;
-        lastWiFiAttempt = currentMillis;
       }
-      break;
+    }
 
-    case WIFI_CONNECTED:
-      // Check if WiFi connection is still alive
-      if (WiFi.status() != WL_CONNECTED) {
-        currentWiFiState = WIFI_FAILED;
-        lastWiFiAttempt = currentMillis;
-        break;
-      }
-
-      // Handle credential updates
-      if (wifiHandler.areCredentialsSaved()) {
-        wifiHandler.setCredentialsSaved(false);
-        delay(1500);
-        WiFi.disconnect();
-        delay(1000);
-        currentWiFiState = WIFI_CONNECTING;
-        break;
-      }
-
-      // Reconnect MQTT if needed
-      if (!wifiHandler.client.connected()) {
-        wifiHandler.reconnect();
-      }
-      wifiHandler.client.loop();
-
-      // Handle sensor operations and check for sleep
-      handleSensorOperations(currentMillis);
-      break;
-
-    case WIFI_FAILED:
-      // Handle credential updates
-      if (wifiHandler.areCredentialsSaved()) {
-        wifiHandler.setCredentialsSaved(false);
-        delay(1500);
+    // Check AP timeout during initial setup
+    if (currentMillis - wifiHandler.getApStartTime() >= AP_TIMEOUT)
+    {
+      // If we have saved credentials but couldn't connect, try without AP
+      if (wifiHandler.loadWiFiCredentials())
+      {
+        wifiHandler.stopAccessPoint();
+        wifiHandler.setInitialSetup(false);
         currentWiFiState = WIFI_CONNECTING;
       }
-      // Retry WiFi connection periodically
-      else if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL) {
-        currentWiFiState = WIFI_CONNECTING;
-      }
-      // If we can't connect and have been awake too long, go to sleep (only if dark)
-      else if (currentMillis - wakeupTime >= AWAKE_TIME_MS && !wifiHandler.isApModeActive()) {
-        // Read light sensor to determine if we should sleep
-        ldrValue = analogRead(LDR_PIN);
-        isDark = ldrValue <= SUNLIGHT_THRESHOLD;
-        if (isDark) {
-          goToDeepSleep();
-        }
-      }
+    }
+    break;
+
+  case WIFI_CONNECTING:
+    // Attempt to connect to WiFi
+    if (wifiHandler.attemptWiFiConnection())
+    {
+      currentWiFiState = WIFI_CONNECTED;
+    }
+    else
+    {
+      currentWiFiState = WIFI_FAILED;
+      lastWiFiAttempt = currentMillis;
+    }
+    break;
+
+  case WIFI_CONNECTED:
+    // Check if WiFi connection is still alive
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      currentWiFiState = WIFI_FAILED;
+      lastWiFiAttempt = currentMillis;
       break;
+    }
+
+    // Handle credential updates
+    if (wifiHandler.areCredentialsSaved())
+    {
+      wifiHandler.setCredentialsSaved(false);
+      delay(1500);
+      WiFi.disconnect();
+      delay(1000);
+      currentWiFiState = WIFI_CONNECTING;
+      break;
+    }
+
+    // Reconnect MQTT if needed
+    if (!wifiHandler.client.connected())
+    {
+      wifiHandler.reconnect();
+    }
+    wifiHandler.client.loop();
+
+    // Handle sensor operations and check for sleep
+    handleSensorOperations(currentMillis);
+    break;
+
+  case WIFI_FAILED:
+    // Handle credential updates
+    if (wifiHandler.areCredentialsSaved())
+    {
+      wifiHandler.setCredentialsSaved(false);
+      delay(1500);
+      currentWiFiState = WIFI_CONNECTING;
+    }
+    // Retry WiFi connection periodically
+    else if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL)
+    {
+      currentWiFiState = WIFI_CONNECTING;
+    }
+    // If we can't connect and have been awake too long, go to sleep (only if dark)
+    else if (currentMillis - wakeupTime >= AWAKE_TIME_MS && !wifiHandler.isApModeActive())
+    {
+      // Read light sensor to determine if we should sleep
+      ldrValue = analogRead(LDR_PIN);
+      isDark = ldrValue <= SUNLIGHT_THRESHOLD;
+      if (isDark)
+      {
+        goToDeepSleep();
+      }
+    }
+    break;
   }
 
   // Check if we should go to deep sleep (only when dark, not in AP mode, and tasks completed)
-  if (!wifiHandler.isApModeActive() && tasksCompleted && (currentMillis - wakeupTime >= AWAKE_TIME_MS)) {
+  if (!wifiHandler.isApModeActive() && tasksCompleted && (currentMillis - wakeupTime >= AWAKE_TIME_MS))
+  {
     // Read light sensor to determine if we should sleep
     ldrValue = analogRead(LDR_PIN);
     isDark = ldrValue <= SUNLIGHT_THRESHOLD;
 
-    if (isDark) {
+    if (isDark)
+    {
       goToDeepSleep();
-    } else {
+    }
+    else
+    {
       // It's sunny - reset task completion to continue operation
       tasksCompleted = false;
-      justWokeUp = false;  // Reset to allow periodic data sending
+      justWokeUp = false; // Reset to allow periodic data sending
     }
   }
 
@@ -178,7 +206,8 @@ void loop() {
 }
 
 // Function to handle sensor operations (only when connected to WiFi)
-void handleSensorOperations(unsigned long currentMillis) {
+void handleSensorOperations(unsigned long currentMillis)
+{
   checkWateringStatus();
 
   // Read light sensor to determine current light condition
@@ -188,14 +217,18 @@ void handleSensorOperations(unsigned long currentMillis) {
   // Send data when we wake up OR every minute when sunny OR every 10 minutes when dark
   bool shouldSendData = false;
 
-  if (justWokeUp) {
+  if (justWokeUp)
+  {
     shouldSendData = true;
     justWokeUp = false;
-  } else if (!isDark && (currentMillis - lastDataSendTime >= LIGHT_SEND_INTERVAL)) {
+  }
+  else if (!isDark && (currentMillis - lastDataSendTime >= LIGHT_SEND_INTERVAL))
+  {
     shouldSendData = true;
   }
 
-  if (shouldSendData) {
+  if (shouldSendData)
+  {
     lastDataSendTime = currentMillis;
 
     // Read all sensors
@@ -207,13 +240,15 @@ void handleSensorOperations(unsigned long currentMillis) {
     char dataBuffer[10];
 
     // Temperature
-    if (!isnan(temperature)) {
+    if (!isnan(temperature))
+    {
       dtostrf(temperature, 1, 2, dataBuffer);
       wifiHandler.sendTemperature(dataBuffer);
     }
 
     // Humidity
-    if (!isnan(humidity)) {
+    if (!isnan(humidity))
+    {
       dtostrf(humidity, 1, 2, dataBuffer);
       wifiHandler.sendHumidity(dataBuffer);
     }
@@ -234,44 +269,35 @@ void handleSensorOperations(unsigned long currentMillis) {
   handleAutomation(currentMillis);
 
   // Mark tasks as completed only if it's dark (for sleep decision)
-  if (isDark) {
+  if (isDark)
+  {
     tasksCompleted = true;
   }
 }
 
 // Function to check if watering is happening
-void checkWateringStatus() {
-  if (isWatering && millis() - wateringStartTime >= WATERING_DURATION) {
+void checkWateringStatus()
+{
+  if (isWatering && millis() - wateringStartTime >= WATERING_DURATION)
+  {
     isWatering = false;
     digitalWrite(WATER_PUMP_PIN, LOW);
   }
 }
 
-// Automation function with proper timing calculations
-void handleAutomation(unsigned long currentMillis) {
-  // Calculate total uptime (current session + all previous sleep time)
-  unsigned long totalUptime = rtcData.totalSleepTime + currentMillis;
-
-  // Plant watering logic - use total uptime for accurate timing
-  if (moisture >= MOISTURE_THRESHOLD && !isWatering && (totalUptime - rtcData.lastWateringTime >= WATERING_INTERVAL)) {
-    waterPlant(totalUptime);
+// Automation function
+void handleAutomation(unsigned long currentMillis)
+{
+  // Plant watering logic - simple moisture-based watering
+  if (moisture >= MOISTURE_THRESHOLD && !isWatering)
+  {
+    waterPlant();
   }
 }
 
 // Plant watering function
-void waterPlant(unsigned long totalUptime) {
-  // Update last watering time
-  rtcData.lastWateringTime = totalUptime;
-  saveTimingData();
-
-  // Publish watering time to MQTT
-  struct tm timeinfo;
-  if (getLocalTime(&timeinfo)) {
-    char timeBuffer[9];
-    sprintf(timeBuffer, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-    wifiHandler.sendLastWateringTime(timeBuffer);
-  }
-
+void waterPlant()
+{
   // Start watering
   isWatering = true;
   digitalWrite(WATER_PUMP_PIN, HIGH);
@@ -282,10 +308,8 @@ void waterPlant(unsigned long totalUptime) {
 }
 
 // Function to go to deep sleep
-void goToDeepSleep() {
-  // Save current state to preferences as backup
-  saveTimingData();
-
+void goToDeepSleep()
+{
   // Configure wake up timer - now 10 minutes
   esp_sleep_enable_timer_wakeup(DARK_SEND_INTERVAL);
 
@@ -295,22 +319,4 @@ void goToDeepSleep() {
 
   // Go to deep sleep
   esp_deep_sleep_start();
-}
-
-// Function to load timing data from RTC memory or preferences
-void loadTimingData() {
-  // If RTC data seems invalid, load from preferences as backup
-  if (rtcData.lastWateringTime == 0) {
-    wifiHandler.loadLastWateringTime();
-    rtcData.lastWateringTime = wifiHandler.getLastWateringTime();
-  }
-
-  // Update wifiHandler with RTC data
-  wifiHandler.setLastWateringTime(rtcData.lastWateringTime);
-}
-
-// Function to save timing data to preferences
-void saveTimingData() {
-  wifiHandler.setLastWateringTime(rtcData.lastWateringTime);
-  wifiHandler.saveLastWateringTime();
 }
