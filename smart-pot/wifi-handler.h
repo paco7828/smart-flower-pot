@@ -15,7 +15,6 @@ private:
   bool initialSetup = true;
   String savedSSID = "";
   String savedPassword = "";
-  unsigned long lastWateringTime = 0;
 
 public:
   // Instances
@@ -45,10 +44,6 @@ public:
     return this->credentialsSaved;
   }
 
-  unsigned long getLastWateringTime() {
-    return this->lastWateringTime;
-  }
-
   // --------------------------------------------------------------------------
   // ------------------------- SETTER FUNCTIONS -------------------------------
   // --------------------------------------------------------------------------
@@ -59,10 +54,6 @@ public:
 
   void setInitialSetup(bool newInitialSetup) {
     this->initialSetup = newInitialSetup;
-  }
-
-  void setLastWateringTime(unsigned long newTime) {
-    this->lastWateringTime = newTime;
   }
 
   // --------------------------------------------------------------------------
@@ -124,19 +115,7 @@ public:
   // --------------------- FLASH MEMORY FUNCTIONS -----------------------------
   // --------------------------------------------------------------------------
 
-  // Function to load last watering time from flash
-  void loadLastWateringTime() {
-    preferences.begin("watering", true);
-    lastWateringTime = preferences.getULong("lastTime", 0);
-    preferences.end();
-  }
-
-  // Function to save last watering time into flash
-  void saveLastWateringTime() {
-    preferences.begin("watering", false);
-    preferences.putULong("lastTime", lastWateringTime);
-    preferences.end();
-  }
+  // REMOVED: loadLastWateringTime() and saveLastWateringTime() - no longer needed
 
   // Function to load wifi credentials from flash
   bool loadWiFiCredentials() {
