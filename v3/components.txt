@@ -8,6 +8,7 @@
 1x TP4056 - https://www.hestore.hu/prod_10037291.html
 1x 8205A - https://www.hestore.hu/prod_10045032.html
 1x DW01A - https://www.hestore.hu/prod_10046612.html
+1x 4.7kR 0402 resistor - https://www.hestore.hu/prod_10029297.html
 3x 1kR 0402 resistor - https://www.hestore.hu/prod_10030528.html
 1x 100R 0805 resistor - https://www.hestore.hu/prod_10001142.html
 1x Red led THT 2.54mm - https://www.hestore.hu/prod_10036527.html
