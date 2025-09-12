@@ -7,18 +7,24 @@
 // Pins
 const byte MOISTURE_PIN = 0;
 const byte LDR_PIN = 1;
+const byte WATER_SENSOR_PIN = 2;
 const byte WATER_PUMP_PIN = 3;
-const int DHT_PIN = 4;
+const byte DS_TEMP_PIN = 4;
+const byte BUZZER_PIN = 5;
 
 // Timing variables
-const unsigned long WATERING_DURATION = 5000;  // 5 seconds
+const unsigned long WATERING_DURATION = 5000;            // 5 seconds
 const unsigned long LIGHT_SEND_INTERVAL = 60000;         // 1 minute
 const unsigned long DARK_SEND_INTERVAL = 1800000000ULL;  // 30 minutes in microseconds (30 * 60 * 1000 * 1000)
 const unsigned long AP_TIMEOUT = 180000UL;               // 3 minutes for AP mode
 const unsigned long WIFI_RETRY_INTERVAL = 30000;         // 30 seconds between WiFi connection attempts
 
-// Deep sleep timing - FIXED: Changed from 1 minute to 10 minutes
+// Deep sleep timing
 const unsigned long AWAKE_TIME_MS = 10000;  // 10 seconds awake time
+
+// Buzzer timing
+const unsigned long LOW_MOISTURE_BEEP_INTERVAL = 300000;  // 5 minutes (5 * 60 * 1000)
+const unsigned long NO_WATER_BEEP_INTERVAL = 600000;      // 10 minutes (10 * 60 * 1000)
 
 // Thresholds
 const int MOISTURE_THRESHOLD = 2900;
@@ -45,9 +51,9 @@ const char* NTP_SERVER_URL = "pool.ntp.org";
 
 // Default values
 float temperature = 0.0;
-float humidity = 0.0;
 int ldrValue = 0;
 int moisture = 0;
+bool hasWater = false;
 
 // Connection state management
 enum WiFiState {
@@ -77,4 +83,6 @@ RTC_DATA_ATTR struct {
   bool isInitialized = false;
   uint32_t bootCount = 0;
   unsigned long totalSleepTime = 0;
+  unsigned long lastLowMoistureBeep = 0;  // Track last low moisture beep time
+  unsigned long lastNoWaterBeep = 0;      // Track last no water beep time
 } rtcData;

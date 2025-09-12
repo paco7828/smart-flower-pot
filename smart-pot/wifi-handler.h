@@ -91,11 +91,6 @@ public:
     client.loop();
   }
 
-  void sendHumidity(char buffer[10]) {
-    client.publish("okoscserep/humidity", buffer, false);
-    client.loop();
-  }
-
   void sendMoisture(char buffer[10]) {
     client.publish("okoscserep/soil_moisture", buffer, false);
     client.loop();
@@ -106,16 +101,14 @@ public:
     client.loop();
   }
 
-  void sendLastWateringTime(char buffer[9]) {
-    client.publish("okoscserep/last_watering_time", buffer, false);
+  void sendWaterPresence(char buffer[10]) {
+    client.publish("okoscserep/water_presence", buffer, false);
     client.loop();
   }
 
   // --------------------------------------------------------------------------
   // --------------------- FLASH MEMORY FUNCTIONS -----------------------------
   // --------------------------------------------------------------------------
-
-  // REMOVED: loadLastWateringTime() and saveLastWateringTime() - no longer needed
 
   // Function to load wifi credentials from flash
   bool loadWiFiCredentials() {
