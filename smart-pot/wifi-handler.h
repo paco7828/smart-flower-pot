@@ -101,11 +101,6 @@ public:
     client.loop();
   }
 
-  void sendWaterPresence(char buffer[10]) {
-    client.publish("okoscserep/water_presence", buffer, false);
-    client.loop();
-  }
-
   // --------------------------------------------------------------------------
   // --------------------- FLASH MEMORY FUNCTIONS -----------------------------
   // --------------------------------------------------------------------------
