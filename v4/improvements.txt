@@ -1,0 +1,25 @@
+ - 2 separate boards which can communicate via ESP-NOW:
+     - 1st board (collects & sends data):
+        - Reads sensors
+        - Sends them to home assistant via MQTT
+        - Includes:
+             - ESP32 C3 SUPERMINI
+             - Charging circuit
+             - Step up circuit
+             - Light sensor
+             - Buzzer
+             - Status Leds (same as in V3)
+             - Soil moisture sensor
+             - Temperature sensor
+             - Solar panel & battery connector
+
+     - 2nd board (watering station):
+         - Checks water level and runs the water pump accordingly
+         - Separate battery for water pump control
+         - Includes:
+             - Water pump
+             - Water level sensor
+             - ESP32 C3 SUPERMINI
+
+
+ - Change buzzer to smaller version -> https://www.hestore.hu/prod_10026555.html
