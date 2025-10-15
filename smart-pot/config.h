@@ -6,13 +6,18 @@
 
 // Pins
 const byte MOISTURE_PIN = 0;
-const byte LDR_PIN = 1;
-const byte WATER_PUMP_PIN = 3;
-const byte DS_TEMP_PIN = 4;
-const byte BUZZER_PIN = 5;
+const byte DS_TEMP_PIN = 1;
+const byte LDR_PIN = 2;
+const byte BUZZER_PIN = 3;
+
+// Water station MAC address
+uint8_t waterStationMAC[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+// Secret remote code for water station
+const char SECRET_CODE[] = "WaterOn123";
 
 // Timing variables
-const unsigned long WATERING_DURATION = 5000;            // 5 seconds
+const unsigned long WATERING_DURATION = 5000;            // 5 seconds (for tracking only)
 const unsigned long WATERING_COOLDOWN = 300000;          // 5 minutes between watering cycles
 const unsigned long LIGHT_SEND_INTERVAL = 60000;         // 1 minute
 const unsigned long DARK_SEND_INTERVAL = 1800000000ULL;  // 30 minutes in microseconds (30 * 60 * 1000 * 1000)
@@ -22,8 +27,9 @@ const unsigned long WIFI_RETRY_INTERVAL = 30000;         // 30 seconds between W
 // Deep sleep timing
 const unsigned long AWAKE_TIME_MS = 10000;  // 10 seconds awake time
 
-// Buzzer timing
+// Buzzer
 const unsigned long LOW_MOISTURE_BEEP_INTERVAL = 300000;  // 5 minutes (5 * 60 * 1000)
+const unsigned int LOW_MOISTURE_HZ = 3700;
 
 // Thresholds
 const int MOISTURE_THRESHOLD = 2900;
@@ -76,6 +82,9 @@ unsigned long lastMoistureReading = 0;  // Track when we last checked moisture
 // Deep sleep and wake management
 unsigned long wakeupTime = 0;
 bool tasksCompleted = false;
+
+// ESP-NOW variables
+bool espNowInitialized = false;
 
 // RTC memory structure to persist data across deep sleep
 RTC_DATA_ATTR struct {

@@ -3,6 +3,7 @@
 #include <DallasTemperature.h>
 #include "wifi-handler.h"
 #include <esp_sleep.h>
+#include <esp_now.h>
 
 // DS18B20 Temperature sensor setup
 OneWire oneWire(DS_TEMP_PIN);
@@ -11,17 +12,86 @@ DallasTemperature temperatureSensor(&oneWire);
 // Instances
 WifiHandler wifiHandler;
 
+// ESP-NOW peer info
+esp_now_peer_info_t peerInfo;
+
+// ESP-NOW send callback (updated signature for newer ESP32 core)
+void OnDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
+  Serial.print("ESP-NOW Send Status: ");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
+}
+
+// Function to initialize ESP-NOW
+bool initESPNow() {
+  if (espNowInitialized) {
+    return true;
+  }
+
+  // ESP-NOW works with WiFi already in STA mode
+  // Don't change WiFi mode here if already connected
+  if (WiFi.status() != WL_CONNECTED) {
+    WiFi.mode(WIFI_STA);
+  }
+  
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return false;
+  }
+
+  // Register send callback
+  esp_now_register_send_cb(OnDataSent);
+
+  // Register water station peer
+  memcpy(peerInfo.peer_addr, waterStationMAC, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add ESP-NOW peer");
+    return false;
+  }
+
+  espNowInitialized = true;
+  Serial.println("ESP-NOW initialized successfully");
+  return true;
+}
+
+// Function to send watering command via ESP-NOW
+void sendWateringCommand() {
+  if (!espNowInitialized) {
+    if (!initESPNow()) {
+      Serial.println("Cannot send watering command - ESP-NOW not initialized");
+      return;
+    }
+  }
+
+  Serial.println("Sending watering command to water station...");
+  
+  esp_err_t result = esp_now_send(waterStationMAC, (uint8_t *)SECRET_CODE, strlen(SECRET_CODE));
+  
+  if (result == ESP_OK) {
+    Serial.println("Watering command sent successfully");
+    isWatering = true;
+    wateringStartTime = millis();
+    
+    // Record watering time for cooldown tracking
+    rtcData.lastWateringTime = rtcData.totalSleepTime + millis();
+  } else {
+    Serial.println("Error sending watering command");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
 
   // Initialize sensors and actuators
   pinMode(LDR_PIN, INPUT);
   pinMode(MOISTURE_PIN, INPUT);
-  pinMode(WATER_PUMP_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(WATER_PUMP_PIN, LOW);
 
   playStartupSound();
+
+  Serial.println("Smart Flower Pot - Remote Watering Edition");
 
   // Initialize DS18B20 temperature sensor
   temperatureSensor.begin();
@@ -61,6 +131,8 @@ void setup() {
 
     if (wifiHandler.attemptWiFiConnection()) {
       currentWiFiState = WIFI_CONNECTED;
+      // Initialize ESP-NOW after WiFi is connected
+      initESPNow();
     } else {
       // Connection failed - start AP for reconfiguration (stay awake)
       currentWiFiState = WIFI_FAILED;
@@ -87,7 +159,6 @@ void printSensorValues(unsigned long currentMillis) {
     // Print formatted output
     Serial.println("=== SENSOR VALUES ===");
     Serial.println("Sunlight: " + String(currentLdr) + " (Threshold: " + String(SUNLIGHT_THRESHOLD) + ") - " + (currentLdr > SUNLIGHT_THRESHOLD ? "BRIGHT" : "DARK"));
-    // FIXED: Moisture logic - lower values = drier soil
     Serial.println("Moisture: " + String(currentMoisture) + " (Threshold: " + String(MOISTURE_THRESHOLD) + ") - " + (currentMoisture < MOISTURE_THRESHOLD ? "DRY" : "WET"));
     if (currentTemp != DEVICE_DISCONNECTED_C && currentTemp > -55 && currentTemp < 125) {
       Serial.println("Temperature: " + String(currentTemp, 2) + "°C");
@@ -95,7 +166,8 @@ void printSensorValues(unsigned long currentMillis) {
       Serial.println("Temperature: SENSOR ERROR");
     }
     Serial.println("WiFi State: " + getWiFiStateString());
-    Serial.println("Watering: " + String(isWatering ? "ACTIVE" : "IDLE"));
+    Serial.println("ESP-NOW: " + String(espNowInitialized ? "READY" : "NOT INITIALIZED"));
+    Serial.println("Watering Status: " + String(isWatering ? "ACTIVE" : "IDLE"));
     Serial.println("====================");
   }
 }
@@ -109,7 +181,7 @@ void loop() {
     wifiHandler.dnsServer.processNextRequest();
   }
 
-  // Always check watering status first (critical safety)
+  // Check watering status (for tracking only, no physical pump control)
   checkWateringStatus();
 
   // Handle different WiFi states
@@ -124,6 +196,7 @@ void loop() {
           currentWiFiState = WIFI_CONNECTED;
           wifiHandler.setInitialSetup(false);
           wifiHandler.stopAccessPoint();
+          initESPNow();  // Initialize ESP-NOW after WiFi connection
         } else {
           currentWiFiState = WIFI_FAILED;
         }
@@ -144,6 +217,7 @@ void loop() {
       // Attempt to connect to WiFi
       if (wifiHandler.attemptWiFiConnection()) {
         currentWiFiState = WIFI_CONNECTED;
+        initESPNow();  // Initialize ESP-NOW after WiFi connection
       } else {
         currentWiFiState = WIFI_FAILED;
         lastWiFiAttempt = currentMillis;
@@ -204,7 +278,7 @@ void loop() {
   // Handle buzzer alerts regardless of WiFi state
   handleBuzzerAlerts(currentMillis);
 
-  // Handle automation regardless of WiFi state
+  // Handle automation regardless of WiFi state (requires ESP-NOW)
   handleAutomation(currentMillis);
 
   // Check if we should go to deep sleep (only when dark, not in AP mode, and tasks completed)
@@ -290,7 +364,6 @@ void handleBuzzerAlerts(unsigned long currentMillis) {
   unsigned long timeSinceLastLowMoistureBeep = rtcData.totalSleepTime + currentMillis - rtcData.lastLowMoistureBeep;
 
   // Low moisture beep every 5 minutes (300000 ms)
-  // FIXED: If moisture is BELOW threshold (dry), beep
   if (moisture < MOISTURE_THRESHOLD && timeSinceLastLowMoistureBeep >= LOW_MOISTURE_BEEP_INTERVAL) {
     singleBeep();
     rtcData.lastLowMoistureBeep = rtcData.totalSleepTime + currentMillis;
@@ -298,19 +371,17 @@ void handleBuzzerAlerts(unsigned long currentMillis) {
   }
 }
 
-// Function to check if watering is happening
+// Function to check if watering is happening (for tracking only)
 void checkWateringStatus() {
   if (isWatering && millis() - wateringStartTime >= WATERING_DURATION) {
     isWatering = false;
-    digitalWrite(WATER_PUMP_PIN, LOW);
-    Serial.println("Watering stopped automatically");
+    Serial.println("Watering cycle completed (tracking)");
   }
 }
 
 void playStartupSound() {
   Serial.println("Playing startup sound...");
 
-  // Method 1: Try tone() function (for passive buzzers)
   tone(BUZZER_PIN, 1000, 200);  // 1000Hz for 200ms
   delay(250);
   tone(BUZZER_PIN, 1500, 200);  // 1500Hz for 200ms
@@ -328,41 +399,18 @@ void handleAutomation(unsigned long currentMillis) {
     moisture = analogRead(MOISTURE_PIN);
     lastMoistureReading = currentMillis;
 
-    // FIXED: Plant watering logic - if moisture is below threshold (dry soil), start watering
+    // If moisture is below threshold (dry soil), trigger watering via ESP-NOW
     if (moisture < MOISTURE_THRESHOLD && !isWatering) {
       // Check cooldown before attempting to water
       unsigned long timeSinceLastWatering = rtcData.totalSleepTime + millis() - rtcData.lastWateringTime;
 
       if (timeSinceLastWatering >= WATERING_COOLDOWN) {
-        waterPlant();
+        sendWateringCommand();
       } else {
         Serial.println("Soil is dry but watering is in cooldown. Next watering in: " + String((WATERING_COOLDOWN - timeSinceLastWatering) / 1000) + "s");
       }
     }
   }
-}
-
-// Plant watering function
-void waterPlant() {
-  // Check if enough time has passed since last watering
-  unsigned long timeSinceLastWatering = rtcData.totalSleepTime + millis() - rtcData.lastWateringTime;
-
-  if (timeSinceLastWatering < WATERING_COOLDOWN) {
-    Serial.println("Watering cooldown active. Time since last: " + String(timeSinceLastWatering / 1000) + "s");
-    return;  // Don't water if still in cooldown period
-  }
-
-  isWatering = true;
-  digitalWrite(WATER_PUMP_PIN, HIGH);
-  wateringStartTime = millis();
-
-  // Record watering time for cooldown tracking in RTC memory
-  rtcData.lastWateringTime = rtcData.totalSleepTime + millis();
-
-  Serial.println("Starting watering - Moisture: " + String(moisture) + " (Threshold: " + String(MOISTURE_THRESHOLD) + ")");
-
-  // Don't go to sleep while watering, regardless of light condition
-  tasksCompleted = false;
 }
 
 // Buzzer functions
@@ -372,20 +420,27 @@ void singleBeep() {
 
 // Function to go to deep sleep
 void goToDeepSleep() {
-  // Make sure water pump is off before sleeping
+  // Make sure watering flag is cleared
   if (isWatering) {
-    digitalWrite(WATER_PUMP_PIN, LOW);
     isWatering = false;
   }
 
   // Configure wake up timer - now 10 minutes
   esp_sleep_enable_timer_wakeup(DARK_SEND_INTERVAL);
 
+  // Deinitialize ESP-NOW before sleep
+  if (espNowInitialized) {
+    esp_now_deinit();
+    espNowInitialized = false;
+  }
+
   // Disconnect WiFi to save power
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
 
   delay(100);
+
+  Serial.println("Going to deep sleep...");
 
   // Go to deep sleep
   esp_deep_sleep_start();
