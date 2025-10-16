@@ -17,7 +17,6 @@ uint8_t waterStationMAC[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 const char SECRET_CODE[] = "WaterOn123";
 
 // Timing variables
-const unsigned long WATERING_DURATION = 5000;            // 5 seconds (for tracking only)
 const unsigned long WATERING_COOLDOWN = 300000;          // 5 minutes between watering cycles
 const unsigned long LIGHT_SEND_INTERVAL = 60000;         // 1 minute
 const unsigned long DARK_SEND_INTERVAL = 1800000000ULL;  // 30 minutes in microseconds (30 * 60 * 1000 * 1000)

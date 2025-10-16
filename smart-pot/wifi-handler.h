@@ -3,7 +3,7 @@
 #include <PubSubClient.h>
 #include <Preferences.h>
 #include <DNSServer.h>
-#include <ESPAsyncWebServer.h>
+#include <WebServer.h>
 #include "html.h"
 
 class WifiHandler {
@@ -22,7 +22,7 @@ public:
   PubSubClient client;
   Preferences preferences;
   DNSServer dnsServer;
-  AsyncWebServer server;
+  WebServer server;  // Changed from AsyncWebServer
   struct tm localTime;
 
   // Constructor
@@ -83,6 +83,7 @@ public:
     MQTT_PASSWORD = preferences.getString("pass", "okoscserep123");
     preferences.end();
 
+    Serial.println("MQTT Config: " + MQTT_SERVER_IP + ":" + String(MQTT_SERVER_PORT));
     return (MQTT_SERVER_IP != "");
   }
 
@@ -111,7 +112,13 @@ public:
     savedSSID = preferences.getString("ssid", "");
     savedPassword = preferences.getString("pass", "");
     preferences.end();
-    return (savedSSID != "" && savedPassword != "");
+
+    if (savedSSID != "" && savedPassword != "") {
+      Serial.println("Credentials loaded: " + savedSSID);
+      return true;
+    }
+    Serial.println("No credentials found - starting AP mode");
+    return false;
   }
 
   // Function to save configuration to flash
@@ -137,6 +144,8 @@ public:
     MQTT_SERVER_PORT = mqttPort;
     MQTT_USERNAME = mqttUser;
     MQTT_PASSWORD = mqttPass;
+
+    Serial.println("Configuration saved successfully");
   }
 
   // --------------------------------------------------------------------------
@@ -145,9 +154,31 @@ public:
 
   // Function to start Access Point - ONLY during initial setup or when no WiFi credentials
   void startAccessPoint() {
+    Serial.println("Starting Access Point...");
+
+    // Properly disconnect any existing connections first
+    WiFi.disconnect(true);
+    delay(100);
+
+    // Set mode to AP only
     WiFi.mode(WIFI_AP);
+    delay(100);
+
+    // Configure and start AP
     WiFi.softAPConfig(localIP, gatewayIP, subnet);
-    WiFi.softAP(AP_SSID);
+    bool apStarted = WiFi.softAP(AP_SSID);
+
+    if (!apStarted) {
+      Serial.println("Failed to start AP!");
+      return;
+    }
+
+    Serial.println("AP started successfully");
+    Serial.print("AP IP address: ");
+    Serial.println(WiFi.softAPIP());
+
+    // Wait for AP to be fully ready
+    delay(500);
 
     dnsServer.start(53, "*", localIP);
     setupWebServer();
@@ -159,65 +190,61 @@ public:
   // Function to stop Access Point
   void stopAccessPoint() {
     if (apModeActive) {
+      Serial.println("Stopping Access Point...");
       dnsServer.stop();
-      server.end();
+      server.stop();
       WiFi.softAPdisconnect(true);
       apModeActive = false;
+      delay(100);
     }
   }
 
   // Function to setup web server for captive portal
   void setupWebServer() {
-    server.on("/", HTTP_ANY, [](AsyncWebServerRequest *request) {
-      AsyncWebServerResponse *response = request->beginResponse(200, "text/html", index_html);
-      response->addHeader("Cache-Control", "no-cache");
-      request->send(response);
+    // Root page - serve configuration form
+    server.on("/", HTTP_GET, [this]() {
+      server.send(200, "text/html", index_html);
     });
 
-    server.on("/config", HTTP_POST, [this](AsyncWebServerRequest *request) {
-      String wifiSSID, wifiPassword, mqttServer, mqttUser, mqttPass;
-      int mqttPort = 1883;
-
-      // Get WiFi parameters
-      if (request->hasParam("wifi_ssid", true)) wifiSSID = request->getParam("wifi_ssid", true)->value();
-      if (request->hasParam("wifi_password", true)) wifiPassword = request->getParam("wifi_password", true)->value();
-
-      // Get MQTT parameters
-      if (request->hasParam("mqtt_server", true)) mqttServer = request->getParam("mqtt_server", true)->value();
-      if (request->hasParam("mqtt_port", true)) mqttPort = request->getParam("mqtt_port", true)->value().toInt();
-      if (request->hasParam("mqtt_username", true)) mqttUser = request->getParam("mqtt_username", true)->value();
-      if (request->hasParam("mqtt_password", true)) mqttPass = request->getParam("mqtt_password", true)->value();
+    // Handle configuration submission
+    server.on("/config", HTTP_POST, [this]() {
+      String wifiSSID = server.arg("wifi_ssid");
+      String wifiPassword = server.arg("wifi_password");
+      String mqttServer = server.arg("mqtt_server");
+      String mqttPort = server.arg("mqtt_port");
+      String mqttUser = server.arg("mqtt_username");
+      String mqttPass = server.arg("mqtt_password");
 
       // Validate inputs
-      if (wifiSSID.length() == 0 || wifiPassword.length() == 0 || mqttServer.length() == 0 || mqttUser.length() == 0 || mqttPass.length() == 0 || mqttPort < 1 || mqttPort > 65535) {
-        request->send(400, "text/plain", "Invalid configuration parameters");
+      if (wifiSSID.length() == 0 || wifiPassword.length() == 0 || mqttServer.length() == 0 || mqttUser.length() == 0 || mqttPass.length() == 0 || mqttPort.toInt() < 1 || mqttPort.toInt() > 65535) {
+        server.send(400, "text/plain", "Invalid configuration parameters");
         return;
       }
 
       // Save all configuration
-      saveConfiguration(wifiSSID, wifiPassword, mqttServer, mqttPort, mqttUser, mqttPass);
+      saveConfiguration(wifiSSID, wifiPassword, mqttServer, mqttPort.toInt(), mqttUser, mqttPass);
       credentialsSaved = true;
 
       // Send success response
-      AsyncWebServerResponse *response = request->beginResponse(200, "text/html", success_html);
-      response->addHeader("Cache-Control", "no-cache");
-      request->send(response);
+      server.send(200, "text/html", success_html);
     });
 
-    // Handle CORS for AJAX requests
-    server.on("/config", HTTP_OPTIONS, [](AsyncWebServerRequest *request) {
-      AsyncWebServerResponse *response = request->beginResponse(200);
-      response->addHeader("Access-Control-Allow-Origin", "*");
-      response->addHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-      response->addHeader("Access-Control-Allow-Headers", "Content-Type");
-      request->send(response);
+    // Handle OPTIONS for CORS
+    server.on("/config", HTTP_OPTIONS, [this]() {
+      server.sendHeader("Access-Control-Allow-Origin", "*");
+      server.sendHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+      server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+      server.send(200);
     });
 
-    server.onNotFound([](AsyncWebServerRequest *request) {
-      request->redirect("http://4.3.2.1");
+    // Catch-all redirect to captive portal
+    server.onNotFound([this]() {
+      server.sendHeader("Location", "http://4.3.2.1/", true);
+      server.send(302, "text/plain", "");
     });
 
     server.begin();
+    Serial.println("Web server started");
   }
 
   // --------------------------------------------------------------------------
@@ -227,6 +254,7 @@ public:
   // Function to attempt WiFi connection - optimized for deep sleep cycles
   bool attemptWiFiConnection() {
     if (savedSSID == "" || savedPassword == "") {
+      Serial.println("No credentials to connect with");
       return false;
     }
 
@@ -235,22 +263,34 @@ public:
       stopAccessPoint();
     }
 
+    Serial.println("Attempting WiFi connection to: " + savedSSID);
+
+    // Make sure we're in STA mode
     WiFi.mode(WIFI_STA);
+    delay(100);
+
     WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
 
     // Reduced timeout for faster wake-up cycles (15 seconds max)
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 30) {
       delay(500);
+      Serial.print(".");
       attempts++;
 
       // Continue processing AP requests during initial setup only
       if (apModeActive && initialSetup) {
         dnsServer.processNextRequest();
+        server.handleClient();
       }
     }
+    Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("WiFi connected!");
+      Serial.print("IP address: ");
+      Serial.println(WiFi.localIP());
+
       // Initialize MQTT with saved configuration
       client.setServer(MQTT_SERVER_IP.c_str(), MQTT_SERVER_PORT);
 
@@ -262,6 +302,7 @@ public:
       return true;
     }
 
+    Serial.println("WiFi connection failed");
     return false;
   }
 };
