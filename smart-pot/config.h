@@ -11,10 +11,10 @@ const byte LDR_PIN = 2;
 const byte BUZZER_PIN = 3;
 
 // Water station MAC address
-uint8_t waterStationMAC[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+const uint8_t WATER_STATION_MAC[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-// Secret remote code for water station
-const char SECRET_CODE[] = "WaterOn123";
+// Water station's command
+const char WATERING_COMMAND[] = "WaterOn123";
 
 // Timing variables
 const unsigned long WATERING_COOLDOWN = 300000;          // 5 minutes between watering cycles
@@ -81,9 +81,6 @@ unsigned long lastMoistureReading = 0;  // Track when we last checked moisture
 // Deep sleep and wake management
 unsigned long wakeupTime = 0;
 bool tasksCompleted = false;
-
-// ESP-NOW variables
-bool espNowInitialized = false;
 
 // RTC memory structure to persist data across deep sleep
 RTC_DATA_ATTR struct {

@@ -1,23 +1,17 @@
 #include "config.h"
+#include "wifi-handler.h"
+#include "esp-now.h"
 #include <OneWire.h>
 #include <DallasTemperature.h>
-#include "wifi-handler.h"
 #include <esp_sleep.h>
-#include <esp_now.h>
-
-// DS18B20 Temperature sensor setup
-OneWire oneWire(DS_TEMP_PIN);
-DallasTemperature temperatureSensor(&oneWire);
 
 // Instances
+OneWire oneWire(DS_TEMP_PIN);
+DallasTemperature temperatureSensor(&oneWire);
 WifiHandler wifiHandler;
-
-// ESP-NOW peer info
-esp_now_peer_info_t peerInfo;
+ESPNow espnow(WATER_STATION_MAC);
 
 // Function prototypes
-bool initESPNow();
-void sendWateringCommand();
 void printSensorValues(unsigned long currentMillis);
 void handleSensorOperations(unsigned long currentMillis);
 void handleBuzzerAlerts(unsigned long currentMillis);
@@ -31,7 +25,7 @@ void setup()
 {
   Serial.begin(115200);
 
-  // Initialize sensors and actuators
+  // Initialization
   pinMode(LDR_PIN, INPUT);
   pinMode(MOISTURE_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
@@ -84,18 +78,18 @@ void setup()
     if (wifiHandler.attemptWiFiConnection())
     {
       currentWiFiState = WIFI_CONNECTED;
+      delay(500); // WiFi stabilization time
       // Initialize ESP-NOW after WiFi is connected
-      delay(500); // Give WiFi time to stabilize
-      initESPNow();
+      espnow.init();
     }
     else
     {
       // Connection failed - start AP for reconfiguration (stay awake)
       currentWiFiState = WIFI_FAILED;
       wifiHandler.startAccessPoint();
-      // Still initialize ESP-NOW even if WiFi fails (for offline watering)
-      delay(500);
-      initESPNow();
+      delay(500); // WiFi stabilization time
+      // Init ESP-NOW even if WiFi fails (for offline watering)
+      espnow.init();
     }
   }
 }
@@ -130,8 +124,8 @@ void loop()
         currentWiFiState = WIFI_CONNECTED;
         wifiHandler.setInitialSetup(false);
         wifiHandler.stopAccessPoint();
-        delay(500);   // Give WiFi time to stabilize
-        initESPNow(); // Initialize ESP-NOW after WiFi connection
+        delay(500); // WiFi stabilization time
+        espnow.init();
       }
       else
       {
@@ -157,19 +151,15 @@ void loop()
     if (wifiHandler.attemptWiFiConnection())
     {
       currentWiFiState = WIFI_CONNECTED;
-      delay(500);   // Give WiFi time to stabilize
-      initESPNow(); // Initialize ESP-NOW after WiFi connection
+      delay(500); // WiFi stabilization time
+      espnow.init();
     }
     else
     {
       currentWiFiState = WIFI_FAILED;
       lastWiFiAttempt = currentMillis;
       // Initialize ESP-NOW even if WiFi fails (for offline watering)
-      if (!espNowInitialized)
-      {
-        delay(500);
-        initESPNow();
-      }
+      espnow.init();
     }
     break;
 
@@ -234,7 +224,7 @@ void loop()
   // Handle buzzer alerts regardless of WiFi state
   handleBuzzerAlerts(currentMillis);
 
-  // Handle automation regardless of WiFi state (requires ESP-NOW)
+  // Handle automation regardless of WiFi
   handleAutomation(currentMillis);
 
   // Check if we should go to deep sleep (only when dark, not in AP mode, and tasks completed)
@@ -259,62 +249,6 @@ void loop()
   delay(100);
 }
 
-// Function to initialize ESP-NOW
-bool initESPNow()
-{
-  if (espNowInitialized)
-  {
-    return true;
-  }
-
-  // WIFI STA mode
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    WiFi.mode(WIFI_STA);
-  }
-
-  if (esp_now_init() != ESP_OK)
-  {
-    return false;
-  }
-
-  // Register water station peer
-  memcpy(peerInfo.peer_addr, waterStationMAC, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
-
-  if (esp_now_add_peer(&peerInfo) != ESP_OK)
-  {
-    return false;
-  }
-
-  espNowInitialized = true;
-  return true;
-}
-
-// Function to send watering command via ESP-NOW
-void sendWateringCommand()
-{
-  if (!espNowInitialized)
-  {
-    if (!initESPNow())
-    {
-      return;
-    }
-  }
-
-  esp_err_t result = esp_now_send(waterStationMAC, (uint8_t *)SECRET_CODE, strlen(SECRET_CODE));
-
-  if (result == ESP_OK)
-  {
-    isWatering = true;
-    wateringStartTime = millis();
-
-    // Record watering time for cooldown tracking
-    rtcData.lastWateringTime = rtcData.totalSleepTime + millis();
-  }
-}
-
 void printSensorValues(unsigned long currentMillis)
 {
   static unsigned long lastPrintTime = 0;
@@ -336,7 +270,7 @@ void printSensorValues(unsigned long currentMillis)
     Serial.println("Sunlight: " + String(currentLdr) + (currentLdr > SUNLIGHT_THRESHOLD ? "BRIGHT" : "DARK"));
     Serial.println("Moisture: " + String(currentMoisture) + (currentMoisture < MOISTURE_THRESHOLD ? "DRY" : "WET"));
     Serial.println("Temperature: " + String(currentTemp, 2) + "°C");
-    Serial.println("ESP-NOW: " + String(espNowInitialized ? "READY" : "NOT INITIALIZED"));
+    Serial.println("ESP-NOW: " + String(espnow.isReady() ? "READY" : "NOT INITIALIZED"));
     Serial.println("Watering Status: " + String(isWatering ? "ACTIVE" : "IDLE"));
     Serial.println();
   }
@@ -459,7 +393,10 @@ void handleAutomation(unsigned long currentMillis)
 
       if (timeSinceLastWatering >= WATERING_COOLDOWN)
       {
-        sendWateringCommand();
+        espnow.sendCommand(WATERING_COMMAND);
+        wateringStartTime = millis();
+        rtcData.lastWateringTime = rtcData.totalSleepTime + millis();
+        isWatering = true;
       }
       else
       {
@@ -487,12 +424,8 @@ void goToDeepSleep()
   // Configure wake up timer - now 10 minutes
   esp_sleep_enable_timer_wakeup(DARK_SEND_INTERVAL);
 
-  // Deinitialize ESP-NOW before sleep
-  if (espNowInitialized)
-  {
-    esp_now_deinit();
-    espNowInitialized = false;
-  }
+  // Deinitialize espnow before deep sleep
+  espnow.deInit();
 
   // Disconnect WiFi to save power
   WiFi.disconnect();
