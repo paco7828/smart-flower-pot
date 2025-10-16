@@ -85,7 +85,7 @@ public:
     // Check command send state
     bool commandSendOk()
     {
-        return this->isCommandSent
+        return this->isCommandSent;
     }
 
     // Set new mac address after constructor
