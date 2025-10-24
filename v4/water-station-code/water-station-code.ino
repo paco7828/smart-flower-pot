@@ -1,97 +1,114 @@
 #include "config.h"
-#include "wifi-handler.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <Preferences.h>
+#include <DNSServer.h>
+#include <WebServer.h>
+#include "html.h"
 
-// Instances
-WifiHandler wifiHandler;
+// --------------------------------------------------------------------------
+// ------------------------- GLOBAL INSTANCES -------------------------------
+// --------------------------------------------------------------------------
 
-// Function prototypes
+WiFiClient espClient;
+PubSubClient client(espClient);
+Preferences preferences;
+DNSServer dnsServer;
+WebServer server(80);
+
+// --------------------------------------------------------------------------
+// ------------------------- GLOBAL VARIABLES -------------------------------
+// --------------------------------------------------------------------------
+
+unsigned long apStartTime = 0;
+bool apModeActive = false;
+bool credentialsSaved = false;
+String savedSSID = "";
+String savedPassword = "";
+
+// --------------------------------------------------------------------------
+// ------------------------- FUNCTION PROTOTYPES ----------------------------
+// --------------------------------------------------------------------------
+
 void mqttCallback(char* topic, uint8_t* payload, unsigned int length);
-void activatePump();
-void deactivatePump();
-void checkAPStatus();
+void reconnectMQTT();
+bool loadMQTTConfig();
+bool loadWiFiCredentials();
+void saveConfiguration(String ssid, String wifiPass, String mqttServer, int mqttPort, String mqttUser, String mqttPass);
+void startAccessPoint();
+void stopAccessPoint();
+void setupWebServer();
+bool connectWiFi();
+
+// --------------------------------------------------------------------------
+// ------------------------- SETUP ------------------------------------------
+// --------------------------------------------------------------------------
 
 void setup() {
+  // Start serial communication
   Serial.begin(115200);
   delay(1000);
 
+  // Pin modes
   pinMode(PUMP_PIN, OUTPUT);
   pinMode(BTN_PIN, INPUT_PULLUP);
+
+  // Default pin states
   digitalWrite(PUMP_PIN, LOW);
 
-  Serial.println("=== Water Station Starting ===");
+  // Add MQTT callback
+  client.setCallback(mqttCallback);
 
-  // Set MQTT callback
-  wifiHandler.setMqttCallback(mqttCallback);
+  // Load MQTT config
+  loadMQTTConfig();
 
-  Serial.println("Starting Access Point for 1 minute...");
-  wifiHandler.startAccessPoint();
-
-  Serial.print("Station MAC: ");
-  Serial.println(WiFi.softAPmacAddress());
-
-  bool hasCredentials = wifiHandler.loadWiFiCredentials();
-  wifiHandler.loadMQTTConfig();
-
-  Serial.print("Has credentials: ");
-  Serial.println(hasCredentials ? "YES" : "NO");
-
-  Serial.println("Setup complete - AP should be visible as 'Smart-flower-pot'");
-  checkAPStatus();
+  // Start AP
+  startAccessPoint();
 }
+
+// --------------------------------------------------------------------------
+// -------------------------------LOOP --------------------------------------
+// --------------------------------------------------------------------------
 
 void loop() {
   unsigned long currentMillis = millis();
 
-  // Handle web server requests during AP mode
-  if (wifiHandler.isApModeActive()) {
-    wifiHandler.dnsServer.processNextRequest();
-    wifiHandler.server.handleClient();
+  // Handle AP mode
+  if (apModeActive) {
+    dnsServer.processNextRequest();
+    server.handleClient();
 
-    // Check AP timeout (1 minute)
-    if (currentMillis - wifiHandler.getApStartTime() >= AP_TIMEOUT) {
-      bool hasCredentials = wifiHandler.loadWiFiCredentials();
-
-      if (hasCredentials) {
-        Serial.println("AP timeout - stopping AP and attempting WiFi connection...");
-        wifiHandler.stopAccessPoint();
-        delay(1000);
+    // AP timeout
+    if (currentMillis - apStartTime >= AP_TIMEOUT) {
+      if (loadWiFiCredentials()) {
+        // Stop AP & connect to WiFi
+        Serial.println("AP timeout - switching to WiFi mode");
+        stopAccessPoint();
         WiFi.mode(WIFI_STA);
         currentWiFiState = WIFI_CONNECTING;
       } else {
-        Serial.println("No credentials found - restarting AP...");
-        wifiHandler.stopAccessPoint();
-        delay(1000);
-        wifiHandler.startAccessPoint();
+        // Restart AP
+        Serial.println("AP timeout - no credentials, restarting AP");
+        stopAccessPoint();
+        startAccessPoint();
       }
     }
 
-    // Check if credentials were saved during AP mode
-    if (wifiHandler.areCredentialsSaved()) {
-      wifiHandler.setCredentialsSaved(false);
-      Serial.println("New credentials saved - stopping AP and attempting connection...");
-      wifiHandler.stopAccessPoint();
-      delay(1500);
-
+    // Save new credentials & connect to WiFi
+    if (credentialsSaved) {
+      credentialsSaved = false;
+      Serial.println("New credentials - switching to WiFi mode");
+      stopAccessPoint();
       WiFi.mode(WIFI_STA);
       currentWiFiState = WIFI_CONNECTING;
     }
   }
 
-  // Handle different WiFi states
+  // WiFi state machine
   switch (currentWiFiState) {
-    case WIFI_SETUP_MODE:
-      // Waiting for credentials or AP timeout
-      break;
-
     case WIFI_CONNECTING:
-      if (wifiHandler.attemptWiFiConnection()) {
-        Serial.println("WiFi connected successfully!");
-        currentWiFiState = WIFI_CONNECTED;
-      } else {
-        Serial.println("WiFi connection failed");
-        currentWiFiState = WIFI_FAILED;
-        lastWiFiAttempt = currentMillis;
-      }
+      currentWiFiState = connectWiFi() ? WIFI_CONNECTED : WIFI_FAILED;
+      if (currentWiFiState == WIFI_FAILED) lastWiFiAttempt = currentMillis;
       break;
 
     case WIFI_CONNECTED:
@@ -102,132 +119,295 @@ void loop() {
         break;
       }
 
-      // Check if new credentials were saved
-      if (wifiHandler.areCredentialsSaved()) {
-        wifiHandler.setCredentialsSaved(false);
-        Serial.println("New credentials detected - reconnecting...");
+      // Check for new credentials
+      if (credentialsSaved) {
+        credentialsSaved = false;
+        Serial.println("New credentials - reconnecting");
         WiFi.disconnect();
         delay(1000);
         currentWiFiState = WIFI_CONNECTING;
+        break;
       }
 
-      // Ensure MQTT is connected
-      if (!wifiHandler.client.connected()) {
-        wifiHandler.reconnect();
-      }
-      wifiHandler.client.loop();
+      // Maintain MQTT connection
+      if (!client.connected()) reconnectMQTT();
+      client.loop();
       break;
 
     case WIFI_FAILED:
-      // Retry WiFi connection every 30 seconds
+      // Retry connection
       if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL) {
-        // IMPORTANT: Fully disconnect and wait before retry
-        Serial.println("Preparing to retry WiFi connection...");
+        Serial.println("Retrying WiFi connection");
         WiFi.disconnect(true);
         WiFi.mode(WIFI_OFF);
-        delay(500);  // Wait for WiFi to fully stop
-
+        delay(500);
         WiFi.mode(WIFI_STA);
-        delay(500);  // Wait for mode change
-
-        Serial.println("Retrying WiFi connection...");
+        delay(500);
         currentWiFiState = WIFI_CONNECTING;
         lastWiFiAttempt = currentMillis;
       }
       break;
   }
 
-  // Button manual override (active LOW)
-  if (digitalRead(BTN_PIN) == LOW) {
-    if (!pumpActive) {
-      Serial.println("Manual pump activation via button");
-      activatePump();
-      pumpActive = true;
-      pumpStartTime = currentMillis;
-      wifiHandler.sendPumpStatus(true);
-    }
+  // Manual pump button (active LOW)
+  if (digitalRead(BTN_PIN) == LOW && !pumpActive) {
+    Serial.println("Manual pump activation");
+    digitalWrite(PUMP_PIN, HIGH);
+    pumpActive = true;
+    pumpStartTime = currentMillis;
   }
 
-  // Check if pump should be deactivated
-  if (pumpActive && (currentMillis - pumpStartTime >= PUMP_DURATION)) {
-    deactivatePump();
+  // Auto-stop pump after duration
+  if (pumpActive && (currentMillis - pumpStartTime >= WATERING_DURATION)) {
+    digitalWrite(PUMP_PIN, LOW);
     pumpActive = false;
-    wifiHandler.sendPumpStatus(false);
-    Serial.println("Pump deactivated after 5s");
+    Serial.println("Pump deactivated");
   }
 
-  // Status print every 10 seconds
+  // Status logging
   static unsigned long lastStatusPrint = 0;
-  if (currentMillis - lastStatusPrint >= 10000) {
+  if (currentMillis - lastStatusPrint >= STATUS_LOG_INTERVAL) {
     lastStatusPrint = currentMillis;
-    Serial.println("=== Water Station Status ===");
-    checkAPStatus();
-    Serial.println("WiFi: " + String(currentWiFiState == WIFI_CONNECTED ? "CONNECTED" : currentWiFiState == WIFI_CONNECTING ? "CONNECTING"
-                                                                                      : currentWiFiState == WIFI_FAILED     ? "FAILED"
-                                                                                                                            : "SETUP MODE"));
-    Serial.println("MQTT: " + String(wifiHandler.client.connected() ? "CONNECTED" : "DISCONNECTED"));
-    Serial.println("Pump: " + String(pumpActive ? "ACTIVE" : "IDLE"));
 
-    if (currentWiFiState == WIFI_CONNECTED) {
-      Serial.println("WiFi IP: " + WiFi.localIP().toString());
-      Serial.println("WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
-    }
-    Serial.println();
+    const char* wifiStatus[] = { "SETUP", "CONNECTING", "CONNECTED", "FAILED" };
+    Serial.println("WiFi: " + String(wifiStatus[currentWiFiState]));
+    Serial.println("MQTT: " + String(client.connected() ? "CONNECTED" : "DISCONNECTED"));
   }
 
   delay(100);
 }
 
-void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
-  Serial.print("MQTT message received on topic: ");
-  Serial.println(topic);
+// --------------------------------------------------------------------------
+// ------------------------- MQTT -------------------------------------------
+// --------------------------------------------------------------------------
 
+void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
+  // Copy payload to message
   String message = "";
   for (unsigned int i = 0; i < length; i++) {
     message += (char)payload[i];
   }
 
-  Serial.print("Message: ");
-  Serial.println(message);
+  // Output message
+  Serial.println("MQTT: " + String(topic) + " = " + message);
 
-  if (String(topic) == MQTT_TOPIC_WATER_COMMAND) {
-    if (message == "1" && !pumpActive) {
-      Serial.println("✓ Watering command received - activating pump for 5s");
+  // If watering code received => turn pump on
+  if (String(topic) == MQTT_TOPIC_WATER_COMMAND && message == "1" && !pumpActive) {
+    Serial.println("MQTT watering command received");
+    digitalWrite(PUMP_PIN, HIGH);
+    pumpActive = true;
+    pumpStartTime = millis();
+  }
+}
 
-      // Directly control pump with delay for testing
-      digitalWrite(PUMP_PIN, HIGH);
-      Serial.println("Pump ACTIVATED");
+void reconnectMQTT() {
+  if (WiFi.status() != WL_CONNECTED) return;
 
-      delay(5000);  // Block for 5 seconds
-
-      digitalWrite(PUMP_PIN, LOW);
-      Serial.println("Pump DEACTIVATED");
-
-      wifiHandler.sendPumpStatus(false);
+  // Attempt MQTT connection
+  for (int attempts = 0; attempts < MQTT_RECONNECT_ATTEMPTS && !client.connected(); attempts++) {
+    String clientId = "water_station_" + String(random(0xffff), HEX);
+    if (client.connect(clientId.c_str(), MQTT_USERNAME.c_str(), MQTT_PASSWORD.c_str())) {
+      if (client.subscribe(MQTT_TOPIC_WATER_COMMAND)) {
+        Serial.println("MQTT subscribed to: " + String(MQTT_TOPIC_WATER_COMMAND));
+      }
+      return;
     }
+
+    // Failed
+    Serial.println("MQTT failed, rc=" + String(client.state()));
+    delay(1000);
   }
 }
 
-void activatePump() {
-  digitalWrite(PUMP_PIN, HIGH);
-  Serial.println("Pump ACTIVATED");
+// Load MQTT config from flash
+bool loadMQTTConfig() {
+  preferences.begin("mqtt", true);
+  MQTT_SERVER_IP = preferences.getString("server", MQTT_SERVER_IP);
+  MQTT_SERVER_PORT = preferences.getInt("port", MQTT_SERVER_PORT);
+  MQTT_USERNAME = preferences.getString("user", MQTT_USERNAME);
+  MQTT_PASSWORD = preferences.getString("pass", MQTT_PASSWORD);
+  preferences.end();
+
+  Serial.println("MQTT: " + MQTT_SERVER_IP + ":" + String(MQTT_SERVER_PORT));
+  return !MQTT_SERVER_IP.isEmpty();
 }
 
-void deactivatePump() {
-  digitalWrite(PUMP_PIN, LOW);
-  Serial.println("Pump DEACTIVATED");
-}
+// --------------------------------------------------------------------------
+// ------------------------- PREFERENCES ------------------------------------
+// --------------------------------------------------------------------------
 
-void checkAPStatus() {
-  if (wifiHandler.isApModeActive()) {
-    Serial.println("✓ AP is ACTIVE - SSID: Smart-flower-pot");
-    Serial.print("✓ AP IP: ");
-    Serial.println(WiFi.softAPIP());
-    Serial.print("✓ AP MAC: ");
-    Serial.println(WiFi.softAPmacAddress());
-    Serial.print("✓ Connected stations: ");
-    Serial.println(WiFi.softAPgetStationNum());
-  } else {
-    Serial.println("✗ AP is INACTIVE");
+bool loadWiFiCredentials() {
+  preferences.begin("wifi", true);
+  savedSSID = preferences.getString("ssid", "");
+  savedPassword = preferences.getString("pass", "");
+  preferences.end();
+
+  if (!savedSSID.isEmpty() && !savedPassword.isEmpty()) {
+    Serial.println("Loaded credentials: " + savedSSID);
+    return true;
   }
+  Serial.println("No saved credentials");
+  return false;
+}
+
+void saveConfiguration(String ssid, String wifiPass, String mqttServer, int mqttPort, String mqttUser, String mqttPass) {
+  // WiFi
+  preferences.begin("wifi", false);
+  preferences.putString("ssid", ssid);
+  preferences.putString("pass", wifiPass);
+  preferences.end();
+
+  // MQTT
+  preferences.begin("mqtt", false);
+  preferences.putString("server", mqttServer);
+  preferences.putInt("port", mqttPort);
+  preferences.putString("user", mqttUser);
+  preferences.putString("pass", mqttPass);
+  preferences.end();
+
+  savedSSID = ssid;
+  savedPassword = wifiPass;
+  MQTT_SERVER_IP = mqttServer;
+  MQTT_SERVER_PORT = mqttPort;
+  MQTT_USERNAME = mqttUser;
+  MQTT_PASSWORD = mqttPass;
+
+  Serial.println("Configuration saved");
+}
+
+// --------------------------------------------------------------------------
+// ------------------------- ACCESS POINT -----------------------------------
+// --------------------------------------------------------------------------
+
+void startAccessPoint() {
+  // Disconnect from WiFi and set AP mode
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_AP);
+  delay(100);
+
+  // Invalid AP config
+  if (!WiFi.softAPConfig(localIP, gatewayIP, subnet)) {
+    Serial.println("AP config failed!");
+    return;
+  }
+
+  // Invalid SSID
+  if (!WiFi.softAP(AP_SSID)) {
+    Serial.println("AP start failed!");
+    return;
+  }
+
+  Serial.println("AP started: " + String(AP_SSID) + " @ " + WiFi.softAPIP().toString());
+
+  // Start web server
+  dnsServer.start(53, "*", localIP);
+  setupWebServer();
+
+  apStartTime = millis();
+  apModeActive = true;
+}
+
+void stopAccessPoint() {
+  // Exit if AP isn't active
+  if (!apModeActive) return;
+
+  // Stop AP
+  Serial.println("Stopping AP");
+  dnsServer.stop();
+  server.stop();
+  WiFi.softAPdisconnect(true);
+  apModeActive = false;
+  delay(100);
+}
+
+void setupWebServer() {
+  // Serve main configuration with placeholders (flash values)
+  server.on("/", HTTP_GET, []() {
+    String html = String(index_html);
+    html.replace("%MQTT_SERVER%", MQTT_SERVER_IP);
+    html.replace("%MQTT_PORT%", String(MQTT_SERVER_PORT));
+    html.replace("%MQTT_USER%", MQTT_USERNAME);
+    html.replace("%MQTT_PASS%", MQTT_PASSWORD);
+    server.send(200, "text/html", html);
+  });
+
+  // Handle configuration form submission
+  server.on("/config", HTTP_POST, []() {
+    // Extract form parameters
+    String wifiSSID = server.arg("wifi_ssid");
+    String wifiPassword = server.arg("wifi_password");
+    String mqttServer = server.arg("mqtt_server");
+    String mqttPort = server.arg("mqtt_port");
+    String mqttUser = server.arg("mqtt_username");
+    String mqttPass = server.arg("mqtt_password");
+    int port = mqttPort.toInt();
+
+    // Validate all required fields
+    if (wifiSSID.isEmpty() || wifiPassword.isEmpty() || mqttServer.isEmpty() || mqttUser.isEmpty() || mqttPass.isEmpty() || port < 1 || port > 65535) {
+      server.send(400, "text/plain", "Invalid parameters");
+      return;
+    }
+
+    // Save configuration and mark credentials as updated
+    saveConfiguration(wifiSSID, wifiPassword, mqttServer, port, mqttUser, mqttPass);
+    credentialsSaved = true;
+    server.send(200, "text/html", success_html);
+  });
+
+  // Handle CORS preflight requests
+  server.on("/config", HTTP_OPTIONS, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+    server.send(200);
+  });
+
+  // Redirect all unknown requests to main page (captive portal behavior)
+  server.onNotFound([]() {
+    server.sendHeader("Location", "http://4.3.2.1/", true);
+    server.send(302, "text/plain", "");
+  });
+
+  server.begin();
+  Serial.println("Web server started");
+}
+
+// --------------------------------------------------------------------------
+// ------------------------- WIFI -------------------------------------------
+// --------------------------------------------------------------------------
+
+bool connectWiFi() {
+  // No credentials
+  if (savedSSID.isEmpty() || savedPassword.isEmpty()) {
+    Serial.println("No credentials available");
+    return false;
+  }
+
+  // Stop AP if running
+  if (apModeActive) stopAccessPoint();
+
+  // Connect to WiFi
+  Serial.println("Connecting to: " + savedSSID);
+  WiFi.mode(WIFI_STA);
+  delay(100);
+  WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
+
+  // Wait for WiFi connection
+  for (int attempts = 0; attempts < 30 && WiFi.status() != WL_CONNECTED; attempts++) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("WiFi connected: " + WiFi.localIP().toString());
+    client.setServer(MQTT_SERVER_IP.c_str(), MQTT_SERVER_PORT);
+
+    // Get NTP time
+    configTime(3600, 3600, NTP_SERVER_URL);
+    return true;
+  }
+
+  Serial.println("WiFi connection failed");
+  return false;
 }
