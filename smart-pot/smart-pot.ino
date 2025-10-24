@@ -43,7 +43,7 @@ void setup() {
     rtcData.bootCount = 0;
     rtcData.totalSleepTime = 0;
     rtcData.lastLowMoistureBeep = 0;
-    rtcData.lastWateringTime = 0;  // This causes the issue!
+    rtcData.lastWateringTime = 0;
   } else {
     rtcData.bootCount++;
     if (rtcData.bootCount > 1) {
@@ -194,6 +194,7 @@ void printSensorValues(unsigned long currentMillis) {
     lastPrintTime = currentMillis;
 
     int currentLdr = analogRead(LDR_PIN);
+    int currentMoisture = analogRead(MOISTURE_PIN);
 
     temperatureSensor.requestTemperatures();
     float currentTemp = temperatureSensor.getTempCByIndex(0);
@@ -349,17 +350,22 @@ void handleAutomation(unsigned long currentMillis) {
     if (moisture < MOISTURE_THRESHOLD) {
       unsigned long timeSinceLastWatering = rtcData.totalSleepTime + millis() - rtcData.lastWateringTime;
 
-      // Special case for first boot: if lastWateringTime is 0, allow immediate watering
-      bool allowWatering = (rtcData.lastWateringTime == 0) || (timeSinceLastWatering >= WATERING_COOLDOWN);
-
-      if (allowWatering) {
+      if (timeSinceLastWatering >= WATERING_COOLDOWN) {
         Serial.println("!!! SOIL IS DRY - SENDING WATERING COMMAND VIA MQTT !!!");
+
+        // Send watering command
         wifiHandler.sendWaterCommand();
+
+        // Get current timestamp and send it
+        String timestamp = wifiHandler.getCurrentTimestamp();
+        wifiHandler.sendLastWateringTime(timestamp.c_str());
+
+        Serial.println("Watering triggered at: " + timestamp);
 
         wateringStartTime = millis();
         rtcData.lastWateringTime = rtcData.totalSleepTime + millis();
 
-        // Add small delay to ensure MQTT message is sent
+        // Add small delay to ensure MQTT messages are sent
         delay(500);
       } else {
         Serial.println("Soil is dry but watering is in cooldown. Next watering in: " + String((WATERING_COOLDOWN - timeSinceLastWatering) / 1000) + "s");

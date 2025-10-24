@@ -12,9 +12,10 @@ const byte BUZZER_PIN = 3;
 
 // MQTT Topics
 const char* MQTT_TOPIC_WATER_COMMAND = "okoscserep/water_command";
+const char* MQTT_TOPIC_LAST_WATERING_TIME = "okoscserep/last_watering_time";
 
 // Timing variables
-const unsigned long WATERING_COOLDOWN = 300000;  // 5 minutes between watering cycles
+const unsigned long WATERING_COOLDOWN = 1000;  // 5 minutes between watering cycles
 const unsigned long LIGHT_SEND_INTERVAL = 60000;         // 1 minute
 const unsigned long DARK_SEND_INTERVAL = 1800000000ULL;  // 30 minutes in microseconds (30 * 60 * 1000 * 1000)
 const unsigned long AP_TIMEOUT = 60000UL;                // 1 minute for AP mode

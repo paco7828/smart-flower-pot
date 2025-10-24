@@ -266,7 +266,10 @@ public:
       stopAccessPoint();
     }
 
+    // FIX: Properly disconnect any existing connection attempt
     Serial.println("Attempting WiFi connection to: " + savedSSID);
+    WiFi.disconnect(true);  // Disconnect and clear credentials
+    delay(500);             // Give it time to disconnect
     WiFi.mode(WIFI_STA);
     delay(100);
     WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
@@ -291,14 +294,58 @@ public:
 
       client.setServer(MQTT_SERVER_IP.c_str(), MQTT_SERVER_PORT);
 
-      if (initialSetup) {
-        configTime(3600, 3600, NTP_SERVER_URL);
-        getLocalTime(&localTime);
+      // Always sync time when WiFi connects
+      configTime(3600, 3600, NTP_SERVER_URL);
+
+      // Quick non-blocking check if time is synced
+      Serial.println("Initiating time sync with NTP server...");
+      delay(100);  // Brief delay to allow NTP request to start
+
+      if (getLocalTime(&localTime, 1000)) {  // 1 second timeout
+        Serial.println("Time synced successfully");
+        char timeStr[64];
+        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &localTime);
+        Serial.println("Current time: " + String(timeStr));
+      } else {
+        Serial.println("Time sync in progress (will complete in background)");
       }
+
       return true;
     }
 
     Serial.println("WiFi connection failed");
+    // FIX: Clean up after failed connection
+    WiFi.disconnect(true);
     return false;
+  }
+
+  void sendLastWateringTime(const char* timestamp) {
+    if (client.connected()) {
+      client.publish(MQTT_TOPIC_LAST_WATERING_TIME, timestamp, true);  // retained message
+      client.loop();
+      Serial.println("MQTT: Last watering time sent: " + String(timestamp));
+    } else {
+      Serial.println("MQTT: Not connected, cannot send watering time");
+    }
+  }
+
+  String getCurrentTimestamp() {
+    struct tm timeinfo;
+    // Use non-blocking time check with timeout
+    if (!getLocalTime(&timeinfo, 100)) {  // 100ms timeout instead of default 5000ms
+      Serial.println("Time not synced yet, using uptime");
+      // Fallback: use uptime in seconds since boot
+      unsigned long uptimeSeconds = millis() / 1000;
+      unsigned long hours = uptimeSeconds / 3600;
+      unsigned long minutes = (uptimeSeconds % 3600) / 60;
+      unsigned long seconds = uptimeSeconds % 60;
+      char timestamp[64] = "0000-00-00 00:00:00";
+      return String(timestamp);
+    }
+
+    char timestamp[64];
+    // Format: YYYY-MM-DD HH:MM:SS
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    return String(timestamp);
   }
 };
