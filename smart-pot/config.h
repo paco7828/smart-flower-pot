@@ -10,21 +10,15 @@ const byte DS_TEMP_PIN = 1;
 const byte LDR_PIN = 2;
 const byte BUZZER_PIN = 3;
 
-// Water station MAC address
-const uint8_t WATER_STATION_MAC[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-
-// Water station's command
-const char WATERING_COMMAND[] = "WaterOn123";
+// MQTT Topics
+const char* MQTT_TOPIC_WATER_COMMAND = "okoscserep/water_command";
 
 // Timing variables
-const unsigned long WATERING_COOLDOWN = 300000;          // 5 minutes between watering cycles
+const unsigned long WATERING_COOLDOWN = 300000;  // 5 minutes between watering cycles
 const unsigned long LIGHT_SEND_INTERVAL = 60000;         // 1 minute
 const unsigned long DARK_SEND_INTERVAL = 1800000000ULL;  // 30 minutes in microseconds (30 * 60 * 1000 * 1000)
-const unsigned long AP_TIMEOUT = 180000UL;               // 3 minutes for AP mode
-const unsigned long WIFI_RETRY_INTERVAL = 30000;         // 30 seconds between WiFi connection attempts
-
-// Deep sleep timing
-const unsigned long AWAKE_TIME_MS = 10000;  // 10 seconds awake time
+const unsigned long AP_TIMEOUT = 60000UL;                // 1 minute for AP mode
+const unsigned long WIFI_RETRY_INTERVAL = 15000;         // 15 seconds between WiFi connection attempts
 
 // Buzzer
 const unsigned long LOW_MOISTURE_BEEP_INTERVAL = 300000;  // 5 minutes (5 * 60 * 1000)
@@ -34,14 +28,14 @@ const unsigned int LOW_MOISTURE_HZ = 3700;
 const int MOISTURE_THRESHOLD = 2900;
 const int SUNLIGHT_THRESHOLD = 1500;
 
-// Captive portal
-const IPAddress localIP(4, 3, 2, 1);
-const IPAddress gatewayIP(4, 3, 2, 1);
+// Captive portal - FIXED IP CONFIGURATION
+const IPAddress localIP(192, 168, 4, 1);
+const IPAddress gatewayIP(192, 168, 4, 1);
 const IPAddress subnet(255, 255, 255, 0);
-const char* AP_SSID = "Smart-flower-pot";
+const char* AP_SSID = "Smart-Pot";
 
 // Default MQTT broker info (will be overridden by saved config)
-String MQTT_SERVER_IP = "192.168.31.31";
+String MQTT_SERVER_IP = "192.168.31.32";
 int MQTT_SERVER_PORT = 1883;
 String MQTT_USERNAME = "okos-cserep";
 String MQTT_PASSWORD = "okoscserep123";

@@ -16,6 +16,9 @@ private:
   String savedSSID = "";
   String savedPassword = "";
 
+  // Callback function pointer for MQTT messages
+  std::function<void(char*, uint8_t*, unsigned int)> mqttCallback;
+
 public:
   // Instances
   WiFiClient espClient;
@@ -52,34 +55,37 @@ public:
     this->credentialsSaved = newCredsSaved;
   }
 
-  void setInitialSetup(bool newInitialSetup) {
-    this->initialSetup = newInitialSetup;
+  // Set MQTT callback
+  void setMqttCallback(std::function<void(char*, uint8_t*, unsigned int)> callback) {
+    mqttCallback = callback;
+    client.setCallback(callback);
   }
 
   // --------------------------------------------------------------------------
   // ------------------------- MQTT FUNCTIONS ---------------------------------
   // --------------------------------------------------------------------------
 
-  // Function to connect to MQTT with faster connection for deep sleep cycles
+  // Function to connect to MQTT and subscribe to topics
   void reconnect() {
     int attempts = 0;
     while (!client.connected() && WiFi.status() == WL_CONNECTED && attempts < 5) {
-      Serial.print("Attempting MQTT connection... ");
-      String clientId = "smart_flower_pot_" + String(random(0xffff), HEX);
+      String clientId = "water_station_" + String(random(0xffff), HEX);
       if (client.connect(clientId.c_str(), MQTT_USERNAME.c_str(), MQTT_PASSWORD.c_str())) {
-        Serial.println("✓ MQTT connected");
+        Serial.println("MQTT connected");
+        
+        // Subscribe to water command topic
+        if (client.subscribe(MQTT_TOPIC_WATER_COMMAND)) {
+          Serial.println("✓ Subscribed to: " + String(MQTT_TOPIC_WATER_COMMAND));
+        } else {
+          Serial.println("✗ Failed to subscribe to: " + String(MQTT_TOPIC_WATER_COMMAND));
+        }
         break;
       } else {
-        Serial.print("✗ Failed, rc=");
-        Serial.print(client.state());
-        Serial.println(" - Retrying in 1s");
+        Serial.print("MQTT connection failed, rc=");
+        Serial.println(client.state());
         delay(1000);
         attempts++;
       }
-    }
-
-    if (!client.connected()) {
-      Serial.println("✗ MQTT connection failed after 5 attempts");
     }
   }
 
@@ -96,29 +102,11 @@ public:
     return (MQTT_SERVER_IP != "");
   }
 
-  void sendTemperature(char buffer[10]) {
-    client.publish("okoscserep/temperature", buffer, false);
-    client.loop();
-  }
-
-  void sendMoisture(char buffer[10]) {
-    client.publish("okoscserep/soil_moisture", buffer, false);
-    client.loop();
-  }
-
-  void sendSunlightPresence(char buffer[10]) {
-    client.publish("okoscserep/sunlight_presence", buffer, false);
-    client.loop();
-  }
-
-  // NEW: Send watering command via MQTT
-  void sendWaterCommand() {
+  // Send pump status via MQTT
+  void sendPumpStatus(bool active) {
     if (client.connected()) {
-      client.publish(MQTT_TOPIC_WATER_COMMAND, "1", false);
+      client.publish(MQTT_TOPIC_WATER_STATUS, active ? "1" : "0", false);
       client.loop();
-      Serial.println("✓ MQTT: Watering command sent");
-    } else {
-      Serial.println("✗ MQTT: Not connected, cannot send watering command");
     }
   }
 

@@ -1,6 +1,5 @@
 #include "config.h"
 #include "wifi-handler.h"
-#include "esp-now.h"
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <esp_sleep.h>
@@ -9,7 +8,6 @@
 OneWire oneWire(DS_TEMP_PIN);
 DallasTemperature temperatureSensor(&oneWire);
 WifiHandler wifiHandler;
-ESPNow espnow(WATER_STATION_MAC);
 
 // Function prototypes
 void printSensorValues(unsigned long currentMillis);
@@ -21,418 +19,397 @@ void handleAutomation(unsigned long currentMillis);
 void lowMoistureBeep();
 void goToDeepSleep();
 
-void setup()
-{
+void setup() {
   Serial.begin(115200);
 
-  // Initialization
   pinMode(LDR_PIN, INPUT);
   pinMode(MOISTURE_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
 
-  playStartupSound();
+  // Only play startup sound on cold boot, not deep sleep wakeup
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+    // This is a cold boot (power on), play startup sound
+    playStartupSound();
+  } else {
+    // This is a deep sleep wakeup, just do a quick silent initialization
+    Serial.println("Woke up from deep sleep - skipping startup sound");
+  }
 
-  // Initialize DS18B20 temperature sensor
   temperatureSensor.begin();
 
   // Initialize RTC data on first boot
-  if (!rtcData.isInitialized)
-  {
+  if (!rtcData.isInitialized) {
     rtcData.isInitialized = true;
     rtcData.bootCount = 0;
     rtcData.totalSleepTime = 0;
     rtcData.lastLowMoistureBeep = 0;
+    rtcData.lastWateringTime = 0;  // This causes the issue!
+  } else {
+    rtcData.bootCount++;
+    if (rtcData.bootCount > 1) {
+      rtcData.totalSleepTime += (DARK_SEND_INTERVAL / 1000);
+    }
   }
-  rtcData.bootCount++;
 
-  // Add sleep time to total (except for first boot)
-  if (rtcData.bootCount > 1)
-  {
-    rtcData.totalSleepTime += (DARK_SEND_INTERVAL / 1000); // Convert to milliseconds
-  }
-
-  // Record wake up time
   wakeupTime = millis();
   tasksCompleted = false;
   justWokeUp = true;
 
-  // Load existing credentials and configuration
   bool hasCredentials = wifiHandler.loadWiFiCredentials();
   wifiHandler.loadMQTTConfig();
 
-  if (!hasCredentials)
-  {
-    // No credentials saved - start in setup mode (stay awake)
-    // Don't set WiFi mode yet - let startAccessPoint handle it
+  // Check if we have credentials and skip AP mode if we do
+  if (hasCredentials) {
+    Serial.println("Credentials found, attempting direct WiFi connection...");
+    WiFi.mode(WIFI_STA);
+    currentWiFiState = WIFI_CONNECTING;
+  } else {
+    Serial.println("Starting Access Point for 1 minute...");
     wifiHandler.startAccessPoint();
-    wifiHandler.setInitialSetup(true);
+    wifiHandler.setInitialSetup(false);
     currentWiFiState = WIFI_SETUP_MODE;
   }
-  else
-  {
-    // Credentials exist - try to connect directly
-    WiFi.mode(WIFI_STA); // Set STA mode for connection
-    wifiHandler.setInitialSetup(false);
-    currentWiFiState = WIFI_CONNECTING;
 
-    if (wifiHandler.attemptWiFiConnection())
-    {
-      currentWiFiState = WIFI_CONNECTED;
-      delay(500); // WiFi stabilization time
-      // Initialize ESP-NOW after WiFi is connected
-      espnow.init();
-    }
-    else
-    {
-      // Connection failed - start AP for reconfiguration (stay awake)
-      currentWiFiState = WIFI_FAILED;
-      wifiHandler.startAccessPoint();
-      delay(500); // WiFi stabilization time
-      // Init ESP-NOW even if WiFi fails (for offline watering)
-      espnow.init();
-    }
-  }
+  Serial.print("Boot count: ");
+  Serial.println(rtcData.bootCount);
+  Serial.print("Has credentials: ");
+  Serial.println(hasCredentials ? "YES" : "NO");
+
+  // Debug: Print wakeup reason
+  printWakeupReason();
 }
 
-void loop()
-{
+void loop() {
   unsigned long currentMillis = millis();
   printSensorValues(currentMillis);
 
-  // Handle web server requests
-  if (wifiHandler.isApModeActive())
-  {
+  // Handle web server requests during AP mode
+  if (wifiHandler.isApModeActive()) {
     wifiHandler.dnsServer.processNextRequest();
-    wifiHandler.server.handleClient(); // Handle web server requests
+    wifiHandler.server.handleClient();
+
+    if (currentMillis - wifiHandler.getApStartTime() >= AP_TIMEOUT) {
+      wifiHandler.stopAccessPoint();
+      Serial.println("AP timeout reached, stopping AP");
+
+      bool hasCredentials = wifiHandler.loadWiFiCredentials();
+      if (hasCredentials) {
+        WiFi.mode(WIFI_STA);
+        currentWiFiState = WIFI_CONNECTING;
+        Serial.println("Credentials available, attempting WiFi connection...");
+      } else {
+        currentWiFiState = WIFI_FAILED;
+        Serial.println("No credentials available, watering disabled until configured");
+      }
+    }
+
+    if (wifiHandler.areCredentialsSaved()) {
+      wifiHandler.setCredentialsSaved(false);
+      Serial.println("New credentials saved, stopping AP and attempting connection...");
+      wifiHandler.stopAccessPoint();
+      delay(1500);
+
+      WiFi.mode(WIFI_STA);
+      currentWiFiState = WIFI_CONNECTING;
+    }
   }
 
-  // Check watering status (for tracking only, no physical pump control)
+  // Check watering status
   checkWateringStatus();
 
   // Handle different WiFi states
-  switch (currentWiFiState)
-  {
-  case WIFI_SETUP_MODE:
-    // Initial setup mode with AP - stay awake until configured
-    if (wifiHandler.areCredentialsSaved())
-    {
-      wifiHandler.setCredentialsSaved(false);
-      delay(1500); // Give time for success page to be served
+  switch (currentWiFiState) {
+    case WIFI_SETUP_MODE:
+      // Waiting in AP mode
+      break;
 
-      if (wifiHandler.attemptWiFiConnection())
-      {
+    case WIFI_CONNECTING:
+      if (wifiHandler.attemptWiFiConnection()) {
         currentWiFiState = WIFI_CONNECTED;
-        wifiHandler.setInitialSetup(false);
-        wifiHandler.stopAccessPoint();
-        delay(500); // WiFi stabilization time
-        espnow.init();
-      }
-      else
-      {
+        Serial.println("WiFi connected successfully!");
+      } else {
         currentWiFiState = WIFI_FAILED;
+        lastWiFiAttempt = currentMillis;
+        Serial.println("WiFi connection failed");
       }
-    }
+      break;
 
-    // Check AP timeout during initial setup
-    if (currentMillis - wifiHandler.getApStartTime() >= AP_TIMEOUT)
-    {
-      // If we have saved credentials but couldn't connect, try without AP
-      if (wifiHandler.loadWiFiCredentials())
-      {
-        wifiHandler.stopAccessPoint();
-        wifiHandler.setInitialSetup(false);
+    case WIFI_CONNECTED:
+      if (WiFi.status() != WL_CONNECTED) {
+        currentWiFiState = WIFI_FAILED;
+        lastWiFiAttempt = currentMillis;
+        Serial.println("WiFi connection lost");
+        break;
+      }
+
+      // Ensure MQTT is connected with more aggressive retry
+      if (!wifiHandler.client.connected()) {
+        Serial.println("MQTT disconnected, attempting to reconnect...");
+        wifiHandler.reconnect();
+
+        // If we just woke up and MQTT isn't connected, delay a bit to allow connection
+        if (justWokeUp) {
+          delay(2000);
+        }
+      }
+
+      if (wifiHandler.client.connected()) {
+        wifiHandler.client.loop();
+        handleSensorOperations(currentMillis);
+      }
+      break;
+
+    case WIFI_FAILED:
+      if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL) {
         currentWiFiState = WIFI_CONNECTING;
+        Serial.println("Retrying WiFi connection...");
       }
-    }
-    break;
-
-  case WIFI_CONNECTING:
-    // Attempt to connect to WiFi
-    if (wifiHandler.attemptWiFiConnection())
-    {
-      currentWiFiState = WIFI_CONNECTED;
-      delay(500); // WiFi stabilization time
-      espnow.init();
-    }
-    else
-    {
-      currentWiFiState = WIFI_FAILED;
-      lastWiFiAttempt = currentMillis;
-      // Initialize ESP-NOW even if WiFi fails (for offline watering)
-      espnow.init();
-    }
-    break;
-
-  case WIFI_CONNECTED:
-    // Check if WiFi connection is still alive
-    if (WiFi.status() != WL_CONNECTED)
-    {
-      currentWiFiState = WIFI_FAILED;
-      lastWiFiAttempt = currentMillis;
       break;
-    }
-
-    // Handle credential updates
-    if (wifiHandler.areCredentialsSaved())
-    {
-      wifiHandler.setCredentialsSaved(false);
-      delay(1500);
-      WiFi.disconnect();
-      delay(1000);
-      currentWiFiState = WIFI_CONNECTING;
-      break;
-    }
-
-    // Reconnect MQTT if needed
-    if (!wifiHandler.client.connected())
-    {
-      wifiHandler.reconnect();
-    }
-    wifiHandler.client.loop();
-
-    // Handle sensor operations and check for sleep
-    handleSensorOperations(currentMillis);
-    break;
-
-  case WIFI_FAILED:
-    // Handle credential updates
-    if (wifiHandler.areCredentialsSaved())
-    {
-      wifiHandler.setCredentialsSaved(false);
-      delay(1500);
-      currentWiFiState = WIFI_CONNECTING;
-    }
-    // Retry WiFi connection periodically
-    else if (currentMillis - lastWiFiAttempt >= WIFI_RETRY_INTERVAL)
-    {
-      currentWiFiState = WIFI_CONNECTING;
-    }
-    // If we can't connect and have been awake too long, go to sleep (only if dark)
-    else if (currentMillis - wakeupTime >= AWAKE_TIME_MS && !wifiHandler.isApModeActive())
-    {
-      // Read light sensor to determine if we should sleep
-      ldrValue = analogRead(LDR_PIN);
-      isDark = ldrValue <= SUNLIGHT_THRESHOLD;
-      if (isDark)
-      {
-        goToDeepSleep();
-      }
-    }
-    break;
   }
 
   // Handle buzzer alerts regardless of WiFi state
   handleBuzzerAlerts(currentMillis);
 
-  // Handle automation regardless of WiFi
+  // Handle automation (watering) - only when connected
   handleAutomation(currentMillis);
 
-  // Check if we should go to deep sleep (only when dark, not in AP mode, and tasks completed)
-  if (!wifiHandler.isApModeActive() && tasksCompleted && (currentMillis - wakeupTime >= AWAKE_TIME_MS) && !isWatering)
-  {
-    // Read light sensor to determine if we should sleep
-    ldrValue = analogRead(LDR_PIN);
-    isDark = ldrValue <= SUNLIGHT_THRESHOLD;
-
-    if (isDark)
-    {
-      goToDeepSleep();
-    }
-    else
-    {
-      // It's sunny - reset task completion to continue operation
-      tasksCompleted = false;
-      justWokeUp = false; // Reset to allow periodic data sending
-    }
+  // Check if we should go to deep sleep
+  if (!wifiHandler.isApModeActive() && areAllTasksCompleted()) {
+    Serial.println("All conditions met for deep sleep:");
+    Serial.println("- Not in AP mode: YES");
+    Serial.println("- Tasks completed: YES");
+    Serial.println("- Is dark: " + String(isDark ? "YES" : "NO"));
+    Serial.println("- Time awake: " + String(millis() - wakeupTime) + "ms");
+    Serial.println("Going to deep sleep...");
+    goToDeepSleep();
   }
 
   delay(100);
 }
 
-void printSensorValues(unsigned long currentMillis)
-{
+void printSensorValues(unsigned long currentMillis) {
   static unsigned long lastPrintTime = 0;
 
-  // Print sensor values every 5 seconds
-  if (currentMillis - lastPrintTime >= 5000)
-  {
+  if (currentMillis - lastPrintTime >= 5000) {
     lastPrintTime = currentMillis;
 
-    // Read current sensor values
     int currentLdr = analogRead(LDR_PIN);
-    int currentMoisture = analogRead(MOISTURE_PIN);
 
-    // Read temperature
     temperatureSensor.requestTemperatures();
     float currentTemp = temperatureSensor.getTempCByIndex(0);
 
-    // Print formatted output
-    Serial.println("Sunlight: " + String(currentLdr) + (currentLdr > SUNLIGHT_THRESHOLD ? "BRIGHT" : "DARK"));
-    Serial.println("Moisture: " + String(currentMoisture) + (currentMoisture < MOISTURE_THRESHOLD ? "DRY" : "WET"));
+    Serial.println("=== Smart Pot Status ===");
+    Serial.println("Sunlight: " + String(currentLdr) + (currentLdr > SUNLIGHT_THRESHOLD ? " BRIGHT" : " DARK"));
+    Serial.println("Moisture: " + String(currentMoisture) + (currentMoisture < MOISTURE_THRESHOLD ? " DRY" : " WET"));
     Serial.println("Temperature: " + String(currentTemp, 2) + "°C");
-    Serial.println("ESP-NOW: " + String(espnow.isReady() ? "READY" : "NOT INITIALIZED"));
+    Serial.println("WiFi: " + String(currentWiFiState == WIFI_CONNECTED ? "CONNECTED" : currentWiFiState == WIFI_CONNECTING ? "CONNECTING"
+                                                                                      : currentWiFiState == WIFI_FAILED     ? "FAILED"
+                                                                                                                            : "SETUP MODE"));
+    Serial.println("MQTT: " + String(wifiHandler.client.connected() ? "CONNECTED" : "DISCONNECTED"));
     Serial.println("Watering Status: " + String(isWatering ? "ACTIVE" : "IDLE"));
+
+    if (currentWiFiState == WIFI_CONNECTED) {
+      Serial.println("WiFi IP: " + WiFi.localIP().toString());
+      Serial.println("WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
+    }
     Serial.println();
   }
 }
 
-// Function to handle sensor operations (only when connected to WiFi)
-void handleSensorOperations(unsigned long currentMillis)
-{
-  // Read light sensor to determine current light condition
+void handleSensorOperations(unsigned long currentMillis) {
   ldrValue = analogRead(LDR_PIN);
   isDark = ldrValue <= SUNLIGHT_THRESHOLD;
 
-  // Send data when we wake up OR every minute when sunny OR every 10 minutes when dark
   bool shouldSendData = false;
 
-  if (justWokeUp)
-  {
+  if (justWokeUp) {
     shouldSendData = true;
     justWokeUp = false;
-  }
-  else if (!isDark && (currentMillis - lastDataSendTime >= LIGHT_SEND_INTERVAL))
-  {
+  } else if (!isDark && (currentMillis - lastDataSendTime >= LIGHT_SEND_INTERVAL)) {
     shouldSendData = true;
   }
 
-  if (shouldSendData)
-  {
+  if (shouldSendData) {
     lastDataSendTime = currentMillis;
 
-    // Read DS18B20 temperature sensor
     temperatureSensor.requestTemperatures();
     temperature = temperatureSensor.getTempCByIndex(0);
-
-    // Read soil moisture
     moisture = analogRead(MOISTURE_PIN);
 
-    // Buffer for MQTT data
     char dataBuffer[10];
 
-    // Temperature (only if valid reading)
-    if (temperature != DEVICE_DISCONNECTED_C && temperature > -55 && temperature < 125)
-    {
+    if (temperature != DEVICE_DISCONNECTED_C && temperature > -55 && temperature < 125) {
       dtostrf(temperature, 1, 2, dataBuffer);
       wifiHandler.sendTemperature(dataBuffer);
     }
 
-    // Soil moisture
     sprintf(dataBuffer, "%d", moisture);
     wifiHandler.sendMoisture(dataBuffer);
 
-    // Sunlight presence
     sprintf(dataBuffer, "%d", isDark ? 0 : 1);
     wifiHandler.sendSunlightPresence(dataBuffer);
 
-    // Allow some time for MQTT messages to be sent
     delay(1000);
-  }
-
-  // Mark tasks as completed only if it's dark (for sleep decision)
-  if (isDark)
-  {
-    tasksCompleted = true;
   }
 }
 
-// Function to handle buzzer alerts
-void handleBuzzerAlerts(unsigned long currentMillis)
-{
-  // Read moisture every 5 seconds to ensure we have current reading
-  if (currentMillis - lastMoistureReading >= 5000)
-  {
+bool areAllTasksCompleted() {
+  unsigned long currentMillis = millis();
+
+  // Don't even consider sleep until we've been awake for at least 15 seconds
+  if (currentMillis - wakeupTime < 15000) {
+    return false;
+  }
+
+  // Only consider tasks completed if:
+  // 1. We're in dark conditions AND
+  // 2. We've sent at least one set of data after wakeup AND
+  // 3. MQTT is connected AND
+  // 4. We've had enough time to check for watering after MQTT connection
+
+  if (isDark && lastDataSendTime > wakeupTime && wifiHandler.client.connected()) {
+
+    // Additional safety: if soil was dry, make sure we waited long enough
+    // for the automation to potentially trigger watering
+    static bool wateringOpportunityGiven = false;
+    static unsigned long mqttConnectedTime = 0;
+
+    // Track when MQTT first connected
+    if (wifiHandler.client.connected() && mqttConnectedTime == 0) {
+      mqttConnectedTime = currentMillis;
+    }
+
+    // Give at least 10 seconds after MQTT connection for watering decision
+    if (mqttConnectedTime > 0 && (currentMillis - mqttConnectedTime < 10000)) {
+      return false;
+    }
+
+    // If we get here, we've given enough time for watering to trigger
+    wateringOpportunityGiven = true;
+    return true;
+  }
+
+  return false;
+}
+
+void handleBuzzerAlerts(unsigned long currentMillis) {
+  // Read moisture every 5 seconds
+  if (currentMillis - lastMoistureReading >= 5000) {
     moisture = analogRead(MOISTURE_PIN);
     lastMoistureReading = currentMillis;
   }
 
-  // Calculate time since last beep (considering deep sleep cycles)
   unsigned long timeSinceLastLowMoistureBeep = rtcData.totalSleepTime + currentMillis - rtcData.lastLowMoistureBeep;
 
-  // Low moisture beep every 5 minutes (300000 ms)
-  if (moisture < MOISTURE_THRESHOLD && timeSinceLastLowMoistureBeep >= LOW_MOISTURE_BEEP_INTERVAL)
-  {
+  // Low moisture beep should work regardless of sleep state
+  if (moisture < MOISTURE_THRESHOLD && timeSinceLastLowMoistureBeep >= LOW_MOISTURE_BEEP_INTERVAL) {
     lowMoistureBeep();
     rtcData.lastLowMoistureBeep = rtcData.totalSleepTime + currentMillis;
+    Serial.println("Low moisture beep triggered");
   }
 }
 
-// Function to check if watering is happening (for tracking only)
-void checkWateringStatus()
-{
-  if (isWatering)
-  {
+void checkWateringStatus() {
+  if (isWatering) {
     isWatering = false;
   }
 }
 
-void playStartupSound()
-{
-  tone(BUZZER_PIN, 1000, 200); // 1000Hz for 200ms
+void playStartupSound() {
+  tone(BUZZER_PIN, 1000, 200);
   delay(250);
-  tone(BUZZER_PIN, 1500, 200); // 1500Hz for 200ms
+  tone(BUZZER_PIN, 1500, 200);
   delay(250);
-  tone(BUZZER_PIN, 2000, 300); // 2000Hz for 300ms
+  tone(BUZZER_PIN, 2000, 300);
   delay(350);
 }
 
-// Automation function
-void handleAutomation(unsigned long currentMillis)
-{
-  // Read moisture every 2 seconds when not watering
-  if (!isWatering && (currentMillis - lastMoistureReading >= 2000))
-  {
+void handleAutomation(unsigned long currentMillis) {
+  // Only trigger watering when connected to WiFi and MQTT
+  if (currentWiFiState != WIFI_CONNECTED || !wifiHandler.client.connected()) {
+    Serial.println("Automation: Waiting for MQTT connection...");
+    return;
+  }
+
+  // Debug: Print MQTT status
+  static unsigned long lastMqttDebug = 0;
+  if (currentMillis - lastMqttDebug >= 2000) {
+    lastMqttDebug = currentMillis;
+    Serial.println("Automation: MQTT connected, checking moisture...");
+  }
+
+  // Read moisture every 2 seconds
+  if (currentMillis - lastMoistureReading >= 2000) {
     moisture = analogRead(MOISTURE_PIN);
     lastMoistureReading = currentMillis;
 
-    // If moisture is below threshold (dry soil), trigger watering via ESP-NOW
-    if (moisture < MOISTURE_THRESHOLD && !isWatering)
-    {
-      // Check cooldown before attempting to water
+    Serial.println("Automation - Moisture: " + String(moisture) + " | Threshold: " + String(MOISTURE_THRESHOLD) + " | Dry: " + String(moisture < MOISTURE_THRESHOLD ? "YES" : "NO"));
+
+    // If moisture is below threshold (dry soil), trigger watering via MQTT
+    if (moisture < MOISTURE_THRESHOLD) {
       unsigned long timeSinceLastWatering = rtcData.totalSleepTime + millis() - rtcData.lastWateringTime;
 
-      if (timeSinceLastWatering >= WATERING_COOLDOWN)
-      {
-        espnow.sendCommand(WATERING_COMMAND);
+      // Special case for first boot: if lastWateringTime is 0, allow immediate watering
+      bool allowWatering = (rtcData.lastWateringTime == 0) || (timeSinceLastWatering >= WATERING_COOLDOWN);
+
+      if (allowWatering) {
+        Serial.println("!!! SOIL IS DRY - SENDING WATERING COMMAND VIA MQTT !!!");
+        wifiHandler.sendWaterCommand();
+
         wateringStartTime = millis();
         rtcData.lastWateringTime = rtcData.totalSleepTime + millis();
-        isWatering = true;
-      }
-      else
-      {
+
+        // Add small delay to ensure MQTT message is sent
+        delay(500);
+      } else {
         Serial.println("Soil is dry but watering is in cooldown. Next watering in: " + String((WATERING_COOLDOWN - timeSinceLastWatering) / 1000) + "s");
       }
     }
   }
 }
 
-// Buzzer functions
-void lowMoistureBeep()
-{
+void lowMoistureBeep() {
   tone(BUZZER_PIN, LOW_MOISTURE_HZ, 200);
 }
 
-// Function to go to deep sleep
-void goToDeepSleep()
-{
-  // Make sure watering flag is cleared
-  if (isWatering)
-  {
+void goToDeepSleep() {
+  Serial.println("Going to deep sleep for 30 minutes...");
+
+  if (isWatering) {
     isWatering = false;
   }
 
-  // Configure wake up timer - now 10 minutes
   esp_sleep_enable_timer_wakeup(DARK_SEND_INTERVAL);
 
-  // Deinitialize espnow before deep sleep
-  espnow.deInit();
-
-  // Disconnect WiFi to save power
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
 
   delay(100);
-
-  // Go to deep sleep
   esp_deep_sleep_start();
+}
+
+void printWakeupReason() {
+  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+
+  Serial.print("Wakeup reason: ");
+  switch (wakeup_reason) {
+    case ESP_SLEEP_WAKEUP_EXT0:
+      Serial.println("external signal using RTC_IO");
+      break;
+    case ESP_SLEEP_WAKEUP_EXT1:
+      Serial.println("external signal using RTC_CNTL");
+      break;
+    case ESP_SLEEP_WAKEUP_TIMER:
+      Serial.println("timer");
+      break;
+    case ESP_SLEEP_WAKEUP_TOUCHPAD:
+      Serial.println("touchpad");
+      break;
+    case ESP_SLEEP_WAKEUP_ULP:
+      Serial.println("ULP program");
+      break;
+    default:
+      Serial.println("NOT from deep sleep (cold boot)");
+      break;
+  }
 }
