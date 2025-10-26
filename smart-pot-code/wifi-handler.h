@@ -270,9 +270,15 @@ public:
         return;
       }
 
+      // Save configuration and send success response
       saveConfiguration(wifiSSID, wifiPassword, mqttServer, port, mqttUser, mqttPass);
+
+      // Send a simple success response
+      server.sendHeader("Connection", "close");
+      server.send(200, "text/plain", "OK");
+
+      // Mark credentials as saved to trigger reconnection
       credentialsSaved = true;
-      server.send(200, "text/html", success_html);
     });
 
     // CORS preflight
@@ -285,7 +291,7 @@ public:
 
     // Captive portal redirect
     server.onNotFound([this]() {
-      server.sendHeader("Location", "http://4.3.2.1/", true);
+      server.sendHeader("Location", "http://192.168.4.1/", true);
       server.send(302, "text/plain", "");
     });
 
@@ -309,8 +315,8 @@ public:
     Serial.println(savedSSID);
 
     // Properly clean up any existing connection attempt
-    WiFi.disconnect(true);  // Add this line
-    delay(100);             // Give it time to disconnect
+    WiFi.disconnect(true);
+    delay(100);
 
     WiFi.mode(WIFI_STA);
     delay(100);

@@ -26,12 +26,19 @@ void setup() {
   pinMode(MOISTURE_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
 
+  // Check if this is a cold boot
+  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+  isColdBoot = (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED);
+
   // Play startup sound only on cold boot
-  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+  if (isColdBoot) {
+    Serial.println("Cold boot detected");
     for (int i = 0; i < 3; i++) {
       tone(BUZZER_PIN, MELODY[i], DURATIONS[i]);
       delay(DELAYS[i]);
     }
+  } else {
+    Serial.println("Waking from deep sleep");
   }
 
   temperatureSensor.begin();
@@ -51,18 +58,25 @@ void setup() {
   tasksCompleted = false;
   justWokeUp = true;
 
-  // Load configuration and determine initial WiFi state
+  // Load configuration
   bool hasCredentials = wifiHandler.loadWiFiCredentials();
   wifiHandler.loadMQTTConfig();
 
-  if (hasCredentials) {
-    Serial.println("Credentials found, attempting direct WiFi connection...");
+  // Determine initial WiFi state based on boot type and credentials
+  if (isColdBoot) {
+    // Cold boot - start AP mode first
+    Serial.println("Cold boot: Starting Access Point for configuration...");
+    wifiHandler.startAccessPoint();
+    currentWiFiState = WIFI_SETUP_MODE;
+  } else if (hasCredentials) {
+    // On wake from sleep with credentials, connect directly
+    Serial.println("Wake from sleep: Attempting direct WiFi connection...");
     WiFi.mode(WIFI_STA);
     currentWiFiState = WIFI_CONNECTING;
   } else {
-    Serial.println("Starting Access Point for 1 minute...");
+    // Wake from sleep without credentials - start AP
+    Serial.println("Wake from sleep: No credentials, starting AP...");
     wifiHandler.startAccessPoint();
-    wifiHandler.setInitialSetup(false);
     currentWiFiState = WIFI_SETUP_MODE;
   }
 }
@@ -94,10 +108,10 @@ void handleAPMode(unsigned long currentMillis) {
   wifiHandler.dnsServer.processNextRequest();
   wifiHandler.server.handleClient();
 
-  // Check for AP timeout
-  if (currentMillis - wifiHandler.getApStartTime() >= AP_TIMEOUT) {
+  // Check for AP timeout (only on cold boot)
+  if (isColdBoot && (currentMillis - wifiHandler.getApStartTime() >= AP_TIMEOUT)) {
     wifiHandler.stopAccessPoint();
-    Serial.println("AP timeout reached, stopping AP");
+    Serial.println("AP timeout reached on cold boot, stopping AP");
 
     // Attempt WiFi connection if credentials exist
     if (wifiHandler.loadWiFiCredentials()) {
@@ -106,18 +120,26 @@ void handleAPMode(unsigned long currentMillis) {
       Serial.println("Credentials available, attempting WiFi connection...");
     } else {
       currentWiFiState = WIFI_FAILED;
-      Serial.println("No credentials available, watering disabled until configured");
+      Serial.println("No credentials available, operations limited until configured");
     }
+
+    // Clear cold boot flag after first AP timeout
+    isColdBoot = false;
   }
 
   // Handle new credentials saved during AP mode
   if (wifiHandler.areCredentialsSaved()) {
     wifiHandler.setCredentialsSaved(false);
     Serial.println("New credentials saved, stopping AP and attempting connection...");
+
+    // Small delay to allow the HTTP response to be sent
+    delay(100);
+
     wifiHandler.stopAccessPoint();
-    delay(1500);
+    delay(1000);
     WiFi.mode(WIFI_STA);
     currentWiFiState = WIFI_CONNECTING;
+    isColdBoot = false;  // Clear cold boot flag after successful config
   }
 }
 
@@ -291,7 +313,7 @@ void handleAutomation(unsigned long currentMillis) {
         wateringStartTime = millis();
         rtcData.lastWateringTime = rtcData.totalSleepTime + millis();
 
-        // FIX: Reset the low moisture beep timer when watering occurs
+        // Reset the low moisture beep timer when watering occurs
         rtcData.lastLowMoistureBeep = rtcData.totalSleepTime + millis();
         Serial.println("Low moisture beep timer reset after watering");
 

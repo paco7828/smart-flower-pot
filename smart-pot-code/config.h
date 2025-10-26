@@ -26,15 +26,15 @@ constexpr int MQTT_RECONNECT_ATTEMPTS = 5;
 // Timing variables
 const unsigned long LIGHT_SEND_INTERVAL = 60000UL;       // 1 minute
 const unsigned long DARK_SEND_INTERVAL = 1800000000ULL;  // 30 minutes in microseconds (30 * 60 * 1000 * 1000)
-const unsigned long AP_TIMEOUT = 60000UL;                // 1 minute for AP mode
+const unsigned long AP_TIMEOUT = 180000UL;               // 3 minutes for AP mode on cold boot
 const unsigned long WIFI_RETRY_INTERVAL = 15000UL;       // 15 seconds between WiFi connection attempts
 
 // Watering
-const unsigned long WATERING_COOLDOWN = 1000UL;  // 5 minutes between watering cycles
+const unsigned long WATERING_COOLDOWN = 300000UL;  // 5 minutes between watering cycles
 const char* WATERING_CODE = "1";
 
 // Buzzer
-const unsigned long LOW_MOISTURE_BEEP_INTERVAL = 1000UL;  // 5 minutes (5 * 60 * 1000)
+const unsigned long LOW_MOISTURE_BEEP_INTERVAL = 300000UL;  // 5 minutes (5 * 60 * 1000)
 const unsigned int LOW_MOISTURE_HZ = 3700;
 
 // Thresholds
@@ -76,6 +76,7 @@ enum WiFiState {
 // AP & Wifi variables
 WiFiState currentWiFiState = WIFI_SETUP_MODE;
 unsigned long lastWiFiAttempt = 0;
+bool isColdBoot = false;
 
 // Helper variables
 unsigned long wateringStartTime = 0;

@@ -5,7 +5,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Smart Flower Pot Setup</title>
+  <title>Smart Pot Setup</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
@@ -94,6 +94,12 @@ const char index_html[] PROGMEM = R"rawliteral(
       margin-top: 1em;
       color: #666;
     }
+    .success {
+      display: none;
+      margin-top: 1em;
+      color: #28a745;
+      font-weight: bold;
+    }
     .error {
       color: #dc3545;
       margin-top: 1em;
@@ -142,6 +148,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
       <button type="submit" id="submitBtn">Save Configuration</button>
       <div class="loading" id="loading">Saving configuration...</div>
+      <div class="success" id="success">Configuration saved! Closing...</div>
       <div class="error" id="error">Failed to save configuration. Please try again.</div>
     </form>
   </div>
@@ -152,10 +159,12 @@ const char index_html[] PROGMEM = R"rawliteral(
       
       const submitBtn = document.getElementById('submitBtn');
       const loading = document.getElementById('loading');
+      const success = document.getElementById('success');
       const error = document.getElementById('error');
       
-      // Hide error message
+      // Hide messages
       error.style.display = 'none';
+      success.style.display = 'none';
       
       // Show loading state
       submitBtn.disabled = true;
@@ -172,25 +181,27 @@ const char index_html[] PROGMEM = R"rawliteral(
       .then(response => {
         if (response.ok) {
           // Success - show success message and close
-          loading.innerHTML = 'Configuration saved! Device restarting...';
+          loading.style.display = 'none';
+          success.style.display = 'block';
+          
+          // Close window/tab after short delay
           setTimeout(() => {
-            // Try to close the captive portal page
-            if (window.opener) {
-              window.close();
-            } else {
-              // If we can't close, redirect to a blank page
-              document.body.innerHTML = '<div style="text-align:center; padding:2em; font-family:sans-serif;"><h2>Configuration saved!</h2><p>You can now close this window/tab.</p><p>The device will connect to your network and MQTT broker shortly.</p></div>';
-            }
-          }, 3000);
+            window.close();
+            // If window.close() doesn't work (browser restriction), show message
+            setTimeout(() => {
+              success.innerHTML = 'Configuration saved! You can close this window.';
+            }, 500);
+          }, 1500);
         } else {
-          throw new Error('Network response was not ok');
+          throw new Error('Server returned error status: ' + response.status);
         }
       })
       .catch(error => {
         console.error('Error:', error);
         // Show error message
         loading.style.display = 'none';
-        document.getElementById('error').style.display = 'block';
+        success.style.display = 'none';
+        error.style.display = 'block';
         submitBtn.disabled = false;
       });
     });
@@ -198,66 +209,6 @@ const char index_html[] PROGMEM = R"rawliteral(
     // Auto-focus on WiFi SSID input
     document.getElementById('wifi_ssid').focus();
   </script>
-</body>
-</html>
-)rawliteral";
-
-const char success_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Configuration Saved</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body {
-      font-family: sans-serif;
-      background-color: #e0ffe0;
-      text-align: center;
-      padding: 2em;
-      margin: 0;
-    }
-    .message {
-      background: white;
-      padding: 2em;
-      display: inline-block;
-      border-radius: 10px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      max-width: 400px;
-    }
-    .spinner {
-      border: 4px solid #f3f3f3;
-      border-radius: 50%;
-      border-top: 4px solid #28a745;
-      width: 30px;
-      height: 30px;
-      animation: spin 1s linear infinite;
-      margin: 1em auto;
-    }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-  </style>
-  <script>
-    // Auto-close after 5 seconds
-    setTimeout(function() {
-      if (window.opener) {
-        window.close();
-      } else {
-        document.body.innerHTML = '<div class="message"><h2>Success!</h2><p>You can now close this window/tab.</p><p>The device is connecting to your WiFi network and MQTT broker.</p></div>';
-      }
-    }, 3000);
-  </script>
-</head>
-<body>
-  <div class="message">
-    <h2>Configuration saved!</h2>
-    <div class="spinner"></div>
-    <p>The device will reboot and connect to the network.</p>
-    <p>MQTT broker connection will be established shortly.</p>
-    <p><small>This window will close automatically...</small></p>
-  </div>
 </body>
 </html>
 )rawliteral";
