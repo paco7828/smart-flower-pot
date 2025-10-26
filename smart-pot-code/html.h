@@ -10,10 +10,11 @@ const char index_html[] PROGMEM = R"rawliteral(
   <style>
     body {
       font-family: sans-serif;
-      background-color: #f0f0f0;
+      background-color: #000000;
       text-align: center;
       padding: 2em;
       margin: 0;
+      color: #ffffff;
     }
     .container {
       max-width: 450px;
@@ -21,7 +22,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       margin-bottom: 400px;
     }
     form {
-      background: white;
+      background: rgb(0, 0, 0);
       padding: 2em;
       border-radius: 10px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.2);
@@ -29,13 +30,13 @@ const char index_html[] PROGMEM = R"rawliteral(
     .section {
       margin: 2em 0;
       padding: 1em;
-      border: 1px solid #e0e0e0;
+      border: 1px solid #ffffff;
       border-radius: 8px;
-      background-color: #fafafa;
+      background-color: #000000;
     }
     .section h3 {
       margin-top: 0;
-      color: #333;
+      color: #ffffff;
       font-size: 1.1em;
     }
     .input-group {
@@ -49,14 +50,9 @@ const char index_html[] PROGMEM = R"rawliteral(
       width: 100%;
       max-width: 350px;
       border-radius: 5px;
-      border: 1px solid #ccc;
+      border: 1px solid #ffffff;
       font-size: 1em;
       box-sizing: border-box;
-    }
-    input:focus {
-      outline: none;
-      border-color: #28a745;
-      box-shadow: 0 0 5px rgba(40, 167, 69, 0.3);
     }
     .input-row {
       display: flex;
@@ -76,7 +72,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       border: none;
       border-radius: 5px;
       background-color: #28a745;
-      color: white;
+      color: rgb(0, 0, 0);
       font-size: 1em;
       cursor: pointer;
       margin-top: 1em;
@@ -92,7 +88,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     .loading {
       display: none;
       margin-top: 1em;
-      color: #666;
+      color: #000000;
     }
     .success {
       display: none;
@@ -114,7 +110,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 </head>
 <body>
   <div class="container">
-    <h2>Smart Flower Pot Setup</h2>
+    <h2>Smart Pot Setup</h2>
     <form id="configForm" action="/config" method="POST">
       
       <!-- WiFi Configuration Section -->
@@ -132,11 +128,12 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div class="section">
         <h3>MQTT Broker Configuration</h3>
         <div class="input-group">
-          <div class="input-row">
+          <div class="input-group">
             <input type="text" name="mqtt_server" id="mqtt_server" placeholder="MQTT Server IP" value="%MQTT_SERVER%" required>
-            <input type="number" name="mqtt_port" id="mqtt_port" placeholder="Port" value="%MQTT_PORT%" min="1" max="65535" required>
-          </div>
-          <div class="small-text">Server IP address and port number</div>
+        </div>
+        <div class="input-group">
+            <input type="number" name="mqtt_port" id="mqtt_port" placeholder="MQTT Server Port" value="%MQTT_PORT%" min="1" max="65535" required>
+        </div>
         </div>
         <div class="input-group">
           <input type="text" name="mqtt_username" id="mqtt_username" placeholder="MQTT Username" value="%MQTT_USER%" required>
@@ -189,7 +186,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             window.close();
             // If window.close() doesn't work (browser restriction), show message
             setTimeout(() => {
-              success.innerHTML = 'Configuration saved! You can close this window.';
+              success.innerHTML = 'Configuration saved!';
             }, 500);
           }, 1500);
         } else {
