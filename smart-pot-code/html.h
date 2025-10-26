@@ -127,16 +127,16 @@ const char index_html[] PROGMEM = R"rawliteral(
         <h3>MQTT Broker Configuration</h3>
         <div class="input-group">
           <div class="input-row">
-            <input type="text" name="mqtt_server" id="mqtt_server" placeholder="MQTT Server IP" value="192.168.31.31" required>
-            <input type="number" name="mqtt_port" id="mqtt_port" placeholder="Port" value="1883" min="1" max="65535" required>
+            <input type="text" name="mqtt_server" id="mqtt_server" placeholder="MQTT Server IP" value="%MQTT_SERVER%" required>
+            <input type="number" name="mqtt_port" id="mqtt_port" placeholder="Port" value="%MQTT_PORT%" min="1" max="65535" required>
           </div>
           <div class="small-text">Server IP address and port number</div>
         </div>
         <div class="input-group">
-          <input type="text" name="mqtt_username" id="mqtt_username" placeholder="MQTT Username" value="okos-cserep" required>
+          <input type="text" name="mqtt_username" id="mqtt_username" placeholder="MQTT Username" value="%MQTT_USER%" required>
         </div>
         <div class="input-group">
-          <input type="text" name="mqtt_password" id="mqtt_password" placeholder="MQTT Password" value="okoscserep123" required>
+          <input type="text" name="mqtt_password" id="mqtt_password" placeholder="MQTT Password" value="%MQTT_PASS%" required>
         </div>
       </div>
 

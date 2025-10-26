@@ -7,14 +7,23 @@
 #include "html.h"
 
 class WifiHandler {
-
 private:
-  unsigned long apStartTime = 0;
-  bool apModeActive = false;
-  bool credentialsSaved = false;
-  bool initialSetup = true;
-  String savedSSID = "";
-  String savedPassword = "";
+  unsigned long apStartTime;
+  bool apModeActive;
+  bool credentialsSaved;
+  bool initialSetup;
+  String savedSSID;
+  String savedPassword;
+
+  // Helper function for MQTT publishing
+  inline bool publishMQTT(const char* topic, const char* payload, bool retain = false) {
+    if (client.connected()) {
+      bool result = client.publish(topic, payload, retain);
+      client.loop();
+      return result;
+    }
+    return false;
+  }
 
 public:
   // Instances
@@ -25,124 +34,147 @@ public:
   WebServer server;
   struct tm localTime;
 
-  // Constructor
+  // Constructor with member initializer list
   WifiHandler()
-    : client(espClient), server(80) {}
+    : client(espClient),
+      server(80),
+      apStartTime(0),
+      apModeActive(false),
+      credentialsSaved(false),
+      initialSetup(true) {}
 
   // --------------------------------------------------------------------------
   // ------------------------- GETTER FUNCTIONS -------------------------------
   // --------------------------------------------------------------------------
-  unsigned long getApStartTime() {
-    return this->apStartTime;
+  inline unsigned long getApStartTime() const {
+    return apStartTime;
   }
-
-  bool isApModeActive() {
-    return this->apModeActive;
+  inline bool isApModeActive() const {
+    return apModeActive;
   }
-
-  bool areCredentialsSaved() {
-    return this->credentialsSaved;
+  inline bool areCredentialsSaved() const {
+    return credentialsSaved;
   }
 
   // --------------------------------------------------------------------------
   // ------------------------- SETTER FUNCTIONS -------------------------------
   // --------------------------------------------------------------------------
-
-  void setCredentialsSaved(bool newCredsSaved) {
-    this->credentialsSaved = newCredsSaved;
+  inline void setCredentialsSaved(bool newCredsSaved) {
+    credentialsSaved = newCredsSaved;
   }
-
-  void setInitialSetup(bool newInitialSetup) {
-    this->initialSetup = newInitialSetup;
+  inline void setInitialSetup(bool newInitialSetup) {
+    initialSetup = newInitialSetup;
   }
 
   // --------------------------------------------------------------------------
   // ------------------------- MQTT FUNCTIONS ---------------------------------
   // --------------------------------------------------------------------------
 
-  // Function to connect to MQTT with faster connection for deep sleep cycles
-  void reconnect() {
-    int attempts = 0;
-    while (!client.connected() && WiFi.status() == WL_CONNECTED && attempts < 5) {
-      Serial.print("Attempting MQTT connection... ");
-      String clientId = "smart_flower_pot_" + String(random(0xffff), HEX);
-      if (client.connect(clientId.c_str(), MQTT_USERNAME.c_str(), MQTT_PASSWORD.c_str())) {
-        Serial.println("✓ MQTT connected");
-        break;
-      } else {
-        Serial.print("✗ Failed, rc=");
-        Serial.print(client.state());
-        Serial.println(" - Retrying in 1s");
-        delay(1000);
-        attempts++;
-      }
-    }
+  void reconnectMQTT() {
+    if (WiFi.status() != WL_CONNECTED) return;
 
-    if (!client.connected()) {
-      Serial.println("✗ MQTT connection failed after 5 attempts");
+    // Attempt MQTT connection with retry logic
+    for (int attempts = 0; attempts < MQTT_RECONNECT_ATTEMPTS && !client.connected(); attempts++) {
+      String clientId = "water_station_" + String(random(0xffff), HEX);
+
+      if (client.connect(clientId.c_str(), MQTT_USERNAME.c_str(), MQTT_PASSWORD.c_str())) {
+        if (client.subscribe(MQTT_TOPIC_WATER_COMMAND)) {
+          Serial.println("MQTT subscribed to: " + String(MQTT_TOPIC_WATER_COMMAND));
+        }
+        return;
+      }
+
+      Serial.print("MQTT failed, rc=");
+      Serial.print(client.state());
+      Serial.print(" attempt ");
+      Serial.println(attempts + 1);
+      delay(1000);
     }
   }
 
-  // Function to load MQTT configuration from flash
   bool loadMQTTConfig() {
     preferences.begin("mqtt", true);
-    MQTT_SERVER_IP = preferences.getString("server", "192.168.31.31");
-    MQTT_SERVER_PORT = preferences.getInt("port", 1883);
-    MQTT_USERNAME = preferences.getString("user", "okos-cserep");
-    MQTT_PASSWORD = preferences.getString("pass", "okoscserep123");
+    MQTT_SERVER_IP = preferences.getString("server", MQTT_SERVER_IP);
+    MQTT_SERVER_PORT = preferences.getInt("port", MQTT_SERVER_PORT);
+    MQTT_USERNAME = preferences.getString("user", MQTT_USERNAME);
+    MQTT_PASSWORD = preferences.getString("pass", MQTT_PASSWORD);
     preferences.end();
 
-    Serial.println("MQTT Config: " + MQTT_SERVER_IP + ":" + String(MQTT_SERVER_PORT));
-    return (MQTT_SERVER_IP != "");
+    Serial.print("MQTT: ");
+    Serial.print(MQTT_SERVER_IP);
+    Serial.print(":");
+    Serial.println(MQTT_SERVER_PORT);
+    return !MQTT_SERVER_IP.isEmpty();
   }
 
-  void sendTemperature(char buffer[10]) {
-    client.publish("okoscserep/temperature", buffer, false);
-    client.loop();
+  // Simplified sensor data publishing methods
+  inline void sendTemperature(const char* buffer) {
+    publishMQTT(MQTT_TOPIC_TEMPERATURE, buffer);
   }
 
-  void sendMoisture(char buffer[10]) {
-    client.publish("okoscserep/soil_moisture", buffer, false);
-    client.loop();
+  inline void sendMoisture(const char* buffer) {
+    publishMQTT(MQTT_TOPIC_SOIL_MOISTURE, buffer);
   }
 
-  void sendSunlightPresence(char buffer[10]) {
-    client.publish("okoscserep/sunlight_presence", buffer, false);
-    client.loop();
+  inline void sendSunlightPresence(const char* buffer) {
+    publishMQTT(MQTT_TOPIC_SUNLIGHT_PRESENCE, buffer);
   }
 
-  // NEW: Send watering command via MQTT
   void sendWaterCommand() {
-    if (client.connected()) {
-      client.publish(MQTT_TOPIC_WATER_COMMAND, "1", false);
-      client.loop();
-      Serial.println("✓ MQTT: Watering command sent");
+    if (publishMQTT(MQTT_TOPIC_WATER_COMMAND, WATERING_CODE)) {
+      Serial.println("MQTT: Watering command sent");
     } else {
-      Serial.println("✗ MQTT: Not connected, cannot send watering command");
+      Serial.println("MQTT: Not connected, cannot send watering command");
     }
+  }
+
+  void sendLastWateringTime(const char* timestamp) {
+    if (publishMQTT(MQTT_TOPIC_LAST_WATERING_TIME, timestamp, true)) {
+      Serial.print("MQTT: Last watering time sent: ");
+      Serial.println(timestamp);
+    } else {
+      Serial.println("MQTT: Not connected, cannot send watering time");
+    }
+  }
+
+  String getCurrentTimestamp() {
+    struct tm timeinfo;
+
+    // Fast timeout for non-blocking time check
+    if (!getLocalTime(&timeinfo, 100)) {
+      Serial.println("Time not synced yet, using uptime");
+      // Return empty timestamp on failure (fallback handled in main code)
+      return "0000-00-00 00:00:00";
+    }
+
+    char timestamp[64];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    return String(timestamp);
   }
 
   // --------------------------------------------------------------------------
   // --------------------- FLASH MEMORY FUNCTIONS -----------------------------
   // --------------------------------------------------------------------------
 
-  // Function to load wifi credentials from flash
   bool loadWiFiCredentials() {
     preferences.begin("wifi", true);
     savedSSID = preferences.getString("ssid", "");
     savedPassword = preferences.getString("pass", "");
     preferences.end();
 
-    if (savedSSID != "" && savedPassword != "") {
-      Serial.println("Credentials loaded: " + savedSSID);
+    if (!savedSSID.isEmpty() && !savedPassword.isEmpty()) {
+      Serial.print("Loaded credentials: ");
+      Serial.println(savedSSID);
       return true;
     }
-    Serial.println("No credentials found - starting AP mode");
+
+    Serial.println("No saved credentials");
     return false;
   }
 
-  // Function to save configuration to flash
-  void saveConfiguration(String ssid, String wifiPass, String mqttServer, int mqttPort, String mqttUser, String mqttPass) {
+  void saveConfiguration(const String& ssid, const String& wifiPass,
+                         const String& mqttServer, int mqttPort,
+                         const String& mqttUser, const String& mqttPass) {
     // Save WiFi credentials
     preferences.begin("wifi", false);
     preferences.putString("ssid", ssid);
@@ -157,7 +189,7 @@ public:
     preferences.putString("pass", mqttPass);
     preferences.end();
 
-    // Update current variables
+    // Update cached values
     savedSSID = ssid;
     savedPassword = wifiPass;
     MQTT_SERVER_IP = mqttServer;
@@ -165,7 +197,7 @@ public:
     MQTT_USERNAME = mqttUser;
     MQTT_PASSWORD = mqttPass;
 
-    Serial.println("Configuration saved successfully");
+    Serial.println("Configuration saved");
   }
 
   // --------------------------------------------------------------------------
@@ -173,27 +205,24 @@ public:
   // --------------------------------------------------------------------------
 
   void startAccessPoint() {
-    Serial.println("Starting Access Point...");
     WiFi.disconnect(true);
-    delay(100);
     WiFi.mode(WIFI_AP);
     delay(100);
 
     if (!WiFi.softAPConfig(localIP, gatewayIP, subnet)) {
-      Serial.println("AP Config Failed!");
+      Serial.println("AP config failed!");
       return;
     }
 
-    bool apStarted = WiFi.softAP(AP_SSID);
-    if (!apStarted) {
-      Serial.println("Failed to start AP!");
+    if (!WiFi.softAP(AP_SSID)) {
+      Serial.println("AP start failed!");
       return;
     }
 
-    Serial.println("AP started successfully");
-    Serial.print("AP IP address: ");
+    Serial.print("AP started: ");
+    Serial.print(AP_SSID);
+    Serial.print(" @ ");
     Serial.println(WiFi.softAPIP());
-    delay(1000);
 
     dnsServer.start(53, "*", localIP);
     setupWebServer();
@@ -203,39 +232,50 @@ public:
   }
 
   void stopAccessPoint() {
-    if (apModeActive) {
-      Serial.println("Stopping Access Point...");
-      dnsServer.stop();
-      server.stop();
-      WiFi.softAPdisconnect(true);
-      apModeActive = false;
-      delay(100);
-    }
+    if (!apModeActive) return;
+
+    Serial.println("Stopping AP");
+    dnsServer.stop();
+    server.stop();
+    WiFi.softAPdisconnect(true);
+    apModeActive = false;
+    delay(100);
   }
 
   void setupWebServer() {
+    // Main configuration page with placeholder replacement
     server.on("/", HTTP_GET, [this]() {
-      server.send(200, "text/html", index_html);
+      String html = String(index_html);
+      html.replace("%MQTT_SERVER%", MQTT_SERVER_IP);
+      html.replace("%MQTT_PORT%", String(MQTT_SERVER_PORT));
+      html.replace("%MQTT_USER%", MQTT_USERNAME);
+      html.replace("%MQTT_PASS%", MQTT_PASSWORD);
+      server.send(200, "text/html", html);
     });
 
+    // Configuration form submission handler
     server.on("/config", HTTP_POST, [this]() {
       String wifiSSID = server.arg("wifi_ssid");
       String wifiPassword = server.arg("wifi_password");
       String mqttServer = server.arg("mqtt_server");
-      String mqttPort = server.arg("mqtt_port");
+      String mqttPortStr = server.arg("mqtt_port");
       String mqttUser = server.arg("mqtt_username");
       String mqttPass = server.arg("mqtt_password");
 
-      if (wifiSSID.length() == 0 || wifiPassword.length() == 0 || mqttServer.length() == 0 || mqttUser.length() == 0 || mqttPass.length() == 0 || mqttPort.toInt() < 1 || mqttPort.toInt() > 65535) {
-        server.send(400, "text/plain", "Invalid configuration parameters");
+      int port = mqttPortStr.toInt();
+
+      // Validate inputs
+      if (wifiSSID.isEmpty() || wifiPassword.isEmpty() || mqttServer.isEmpty() || mqttUser.isEmpty() || mqttPass.isEmpty() || port < 1 || port > 65535) {
+        server.send(400, "text/plain", "Invalid parameters");
         return;
       }
 
-      saveConfiguration(wifiSSID, wifiPassword, mqttServer, mqttPort.toInt(), mqttUser, mqttPass);
+      saveConfiguration(wifiSSID, wifiPassword, mqttServer, port, mqttUser, mqttPass);
       credentialsSaved = true;
       server.send(200, "text/html", success_html);
     });
 
+    // CORS preflight
     server.on("/config", HTTP_OPTIONS, [this]() {
       server.sendHeader("Access-Control-Allow-Origin", "*");
       server.sendHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -243,6 +283,7 @@ public:
       server.send(200);
     });
 
+    // Captive portal redirect
     server.onNotFound([this]() {
       server.sendHeader("Location", "http://4.3.2.1/", true);
       server.send(302, "text/plain", "");
@@ -256,96 +297,42 @@ public:
   // ------------------------- WIFI FUNCTIONS ---------------------------------
   // --------------------------------------------------------------------------
 
-  bool attemptWiFiConnection() {
-    if (savedSSID == "" || savedPassword == "") {
-      Serial.println("No credentials to connect with");
+  bool connectWiFi() {
+    if (savedSSID.isEmpty() || savedPassword.isEmpty()) {
+      Serial.println("No credentials available");
       return false;
     }
 
-    if (apModeActive && !initialSetup) {
-      stopAccessPoint();
-    }
+    if (apModeActive) stopAccessPoint();
 
-    // FIX: Properly disconnect any existing connection attempt
-    Serial.println("Attempting WiFi connection to: " + savedSSID);
-    WiFi.disconnect(true);  // Disconnect and clear credentials
-    delay(500);             // Give it time to disconnect
+    Serial.print("Connecting to: ");
+    Serial.println(savedSSID);
+
+    // Properly clean up any existing connection attempt
+    WiFi.disconnect(true);  // Add this line
+    delay(100);             // Give it time to disconnect
+
     WiFi.mode(WIFI_STA);
     delay(100);
     WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
 
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+    // Wait up to 15 seconds for connection
+    for (int attempts = 0; attempts < 30 && WiFi.status() != WL_CONNECTED; attempts++) {
       delay(500);
       Serial.print(".");
-      attempts++;
-
-      if (apModeActive && initialSetup) {
-        dnsServer.processNextRequest();
-        server.handleClient();
-      }
     }
     Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("WiFi connected!");
-      Serial.print("IP address: ");
+      Serial.print("WiFi connected: ");
       Serial.println(WiFi.localIP());
 
       client.setServer(MQTT_SERVER_IP.c_str(), MQTT_SERVER_PORT);
-
-      // Always sync time when WiFi connects
       configTime(3600, 3600, NTP_SERVER_URL);
-
-      // Quick non-blocking check if time is synced
-      Serial.println("Initiating time sync with NTP server...");
-      delay(100);  // Brief delay to allow NTP request to start
-
-      if (getLocalTime(&localTime, 1000)) {  // 1 second timeout
-        Serial.println("Time synced successfully");
-        char timeStr[64];
-        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &localTime);
-        Serial.println("Current time: " + String(timeStr));
-      } else {
-        Serial.println("Time sync in progress (will complete in background)");
-      }
-
       return true;
     }
 
     Serial.println("WiFi connection failed");
-    // FIX: Clean up after failed connection
-    WiFi.disconnect(true);
     return false;
-  }
-
-  void sendLastWateringTime(const char* timestamp) {
-    if (client.connected()) {
-      client.publish(MQTT_TOPIC_LAST_WATERING_TIME, timestamp, true);  // retained message
-      client.loop();
-      Serial.println("MQTT: Last watering time sent: " + String(timestamp));
-    } else {
-      Serial.println("MQTT: Not connected, cannot send watering time");
-    }
-  }
-
-  String getCurrentTimestamp() {
-    struct tm timeinfo;
-    // Use non-blocking time check with timeout
-    if (!getLocalTime(&timeinfo, 100)) {  // 100ms timeout instead of default 5000ms
-      Serial.println("Time not synced yet, using uptime");
-      // Fallback: use uptime in seconds since boot
-      unsigned long uptimeSeconds = millis() / 1000;
-      unsigned long hours = uptimeSeconds / 3600;
-      unsigned long minutes = (uptimeSeconds % 3600) / 60;
-      unsigned long seconds = uptimeSeconds % 60;
-      char timestamp[64] = "0000-00-00 00:00:00";
-      return String(timestamp);
-    }
-
-    char timestamp[64];
-    // Format: YYYY-MM-DD HH:MM:SS
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &timeinfo);
-    return String(timestamp);
   }
 };
