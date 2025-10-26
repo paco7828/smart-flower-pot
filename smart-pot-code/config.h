@@ -16,11 +16,11 @@ const int DURATIONS[] = { 200, 200, 300 };
 const int DELAYS[] = { 250, 250, 350 };
 
 // MQTT
-const char* MQTT_TOPIC_WATER_COMMAND = "okoscserep/water_command";
-const char* MQTT_TOPIC_LAST_WATERING_TIME = "okoscserep/last_watering_time";
-const char* MQTT_TOPIC_TEMPERATURE = "okoscserep/temperature";
-const char* MQTT_TOPIC_SOIL_MOISTURE = "okoscserep/soil_moisture";
-const char* MQTT_TOPIC_SUNLIGHT_PRESENCE = "okoscserep/sunlight_presence";
+const char* MQTT_TOPIC_WATER_COMMAND = "smartpot/water_command";
+const char* MQTT_TOPIC_LAST_WATERING_TIME = "smartpot/last_watering_time";
+const char* MQTT_TOPIC_TEMPERATURE = "smartpot/temperature";
+const char* MQTT_TOPIC_SOIL_MOISTURE = "smartpot/soil_moisture";
+const char* MQTT_TOPIC_SUNLIGHT_PRESENCE = "smartpot/sunlight_presence";
 constexpr int MQTT_RECONNECT_ATTEMPTS = 5;
 
 // Timing variables

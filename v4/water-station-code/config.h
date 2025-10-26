@@ -9,7 +9,7 @@ constexpr uint8_t PUMP_PIN = 0;
 constexpr uint8_t BTN_PIN = 1;
 
 // MQTT & WiFi
-const char* MQTT_TOPIC_WATER_COMMAND = "okoscserep/water_command";
+const char* MQTT_TOPIC_WATER_COMMAND = "smartpot/water_command";
 constexpr int MQTT_RECONNECT_ATTEMPTS = 5;
 
 // Timing variables
